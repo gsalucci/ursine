@@ -1,7 +1,7 @@
 # Tasks — Ursine
 
-**Milestone**: v0.34.0 — package-manager parity batch (2026-11-13)
-**Updated**: 2026-11-13
+**Milestone**: v0.36.0 — filter + inline preview + alignment (2026-11-16)
+**Updated**: 2026-11-16
 **Workflow rule (binding)**: backend first, frontend immediately, same feature. No next feature until daemon + frontend reach parity.
 **UI rule (binding)**: patterns from cosmic-settings (structure), Webmin (action coverage), Cockpit (gating/status/confirmations).
 

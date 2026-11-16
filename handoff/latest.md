@@ -6,6 +6,16 @@
 See `state/session-state.json` for current goals, decisions, risks, and next actions.
 See `AGENTS.md` for project context and milestone history.
 
+## Session 2026-11-16 — GUI fusion cleanup, alignment, filter + inline preview, release 0.36.0 (main, tag `v0.36.0`)
+
+**Status**: Pushed through `9d07385`; auto-pin `f1d69d8` pulled, local HEAD `f1d69d8`. Tag `v0.36.0` = `e8a1653`, tag CI `43859083527` success, HEAD CI `43859782552` success (intermediate main runs cancelled by concurrency = normal). Transient push/keyring hang recurred once; retry with GIT_TRACE succeeded.
+
+- **0.35.0 (Nov13)**: fusion follow-ups — `package_row.rs` merged into `package_ui.rs`; flatpak orphan count (`uninstall --unused` answered `n`, read-only plan parse, `orphans` field, label `Remove orphans… (N)`, disabled at 0); flatpak Preview button (get_flatpak_info → copyable top message); section naming unified (Repositories/Add repository/repository wording); nix header subtitle removed (header/status/busy shape identical).
+- **Alignment pass (`4fce2a0`)**: list-row buttons guarded everywhere, Direct-install/Search arming + Enter-submit + `Searching…` label (new `search_busy` on PackagesState with full lifecycle), Upgrade-all/Add-form guards, `No matches` + `Result / No packages installed.` notes unified, repository rows = identity title + URL detail (apk daemon `ApkRepository.label`, nix name + `url · scope`), **apk reads `/etc/apk/repositories.d/`** (list + Remove rewrites owning fragment; symlinks skipped), placeholders `e.g. …`.
+- **Filter + preview (`cbb9f1d`)**: Filter row in the installed list of all three (client-side title match before count/notes, `No matches` when emptied); pattern preview result INLINE under the buttons (`PatternSection.result`, nix regex dry-runs write it instead of Last-action); blocked pattern clicks now raise copyable errors (armed = non-empty pattern only); superseded preview reply clears `action_busy` before the epoch guard; regex unit tests (pure `matching_names`/`matching_app_ids` extracted, `regex_preview_summary`, extra validator cases — validator has NO backslash by design, tests use `[.]`).
+- **0.36.0 release**: CHANGELOG initially left notes under `[0.35.0]` (no Unreleased heading existed) + blank-line lint miss — fixed in `a1972d6`/`9d07385` (both pushed; docs+typos green).
+- Review closure on every batch (fusion7 nits, permissions7, alignment4, filter2). Gates green each commit.
+
 ## Session 2026-11-13 — 3-line installed rows + nix registry Remove everywhere, release 0.34.0 (main, tag `v0.34.0`)
 
 **Status**: Pushed `1b99076..032fe41` (`33b839c` session + `5ca43d5` + `79141ef` + `88c557e` + `032fe41` chore(release)); CI green for `88c557e` (`43435927270`) and both release runs (`43438763702`/`43438764210` success); auto-pin `74b383d` pulled, local HEAD `74b383d`.
