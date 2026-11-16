@@ -187,6 +187,9 @@ pub enum Message {
     PackagePatternChanged(String),
     /// Client-side filter over the installed/search list.
     PackageFilterChanged(String),
+    /// Half-page browser for the installed list.
+    PackageListBrowserOpen,
+    PackageListBrowserClose,
     /// Dry-run the pattern against the installed list.
     PackagePatternPreviewRequested,
     /// Pattern preview finished (`would_change` names).
@@ -503,6 +506,11 @@ pub enum Message {
     StoreRegexChanged(String),
     /// Client-side filter over the installed/search list.
     StoreFilterChanged(String),
+    /// Half-page browsers (installed list, generations).
+    StoreListBrowserOpen,
+    StoreListBrowserClose,
+    StoreGenerationsBrowserOpen,
+    StoreGenerationsBrowserClose,
     StoreGenerationChanged(String),
     StoreKeepChanged(String),
     StoreKeepPreset(usize),
@@ -714,6 +722,12 @@ impl cosmic::Application for App {
                 self.packages.pattern_result = None;
             }
             Message::PackageFilterChanged(value) => self.packages.installed_filter = value,
+            Message::PackageListBrowserOpen => self.packages.list_browser = true,
+            Message::PackageListBrowserClose => self.packages.list_browser = false,
+            Message::StoreListBrowserOpen => self.store.list_browser = true,
+            Message::StoreListBrowserClose => self.store.list_browser = false,
+            Message::StoreGenerationsBrowserOpen => self.store.generations_browser = true,
+            Message::StoreGenerationsBrowserClose => self.store.generations_browser = false,
             Message::PackagePatternPreviewRequested => return self.request_pattern_preview(),
             Message::PackagePatternPreviewFinished(epoch, result) => {
                 return self.finish_pattern_preview(epoch, result)
@@ -1305,6 +1319,9 @@ impl cosmic::Application for App {
             Message::PackageSearchRequested => return self.search_packages(),
             Message::PackageInstallRequested => return self.install_package_input(),
             Message::PackageInstallDirect(id) => {
+                // Acting from the browser closes it: the confirmation
+                // (or the job panel) lives on the page underneath.
+                self.packages.list_browser = false;
                 return self.install_package(id);
             }
             Message::PackageInstallRemoteChanged(name) => {
@@ -1335,11 +1352,15 @@ impl cosmic::Application for App {
                 return self.confirm_flatpak_orphans();
             }
             Message::PackageRemoveRequested(kind, name, id) => {
+                self.packages.list_browser = false;
                 self.packages.pending_remove = Some((kind, name, id));
             }
             Message::PackageRemoveConfirmed => return self.confirm_package_remove(),
             Message::PackageRemoveCancelled => self.packages.pending_remove = None,
-            Message::ApkUpgradeRequested(package) => return self.upgrade_apk_package(package),
+            Message::ApkUpgradeRequested(package) => {
+                self.packages.list_browser = false;
+                return self.upgrade_apk_package(package);
+            }
             Message::ApkPreviewRequested => return self.preview_apk_package(),
             Message::FlatpakPreviewRequested => return self.preview_flatpak_package(),
             Message::FlatpakPreviewFinished(epoch, result) => {
@@ -1377,7 +1398,8 @@ impl cosmic::Application for App {
                 }
             }
             Message::FlatpakUpgradeRequested(app_id) => {
-                return self.upgrade_flatpak_package(app_id)
+                self.packages.list_browser = false;
+                return self.upgrade_flatpak_package(app_id);
             }
             Message::PackageApkLoaded(epoch, result) => return self.finish_apk(epoch, result),
             Message::PackageApkUpdatesLoaded(epoch, seq, result) => {
@@ -2031,6 +2053,58 @@ impl cosmic::Application for App {
             subscriptions.push(cosmic::iced::event::listen_with(niri_key_message));
         }
         cosmic::iced::Subscription::batch(subscriptions)
+    }
+
+    /// Half-page browsers (installed list, nix generations) render as
+    /// centered modals over the package screen.
+    fn dialog(&self) -> Option<Element<'_, Self::Message>> {
+        if self.screen != Screen::Packages {
+            return None;
+        }
+        let updates_auto = self
+            .settings
+            .config
+            .as_ref()
+            .map_or_else(UpdatesAuto::default, |config| config.updates);
+        match self.package_tab {
+            PackageTab::Nix => {
+                if self.store.list_browser {
+                    let vm = self.store.vm(updates_auto.nix);
+                    return Some(crate::package_ui::list_dialog(
+                        vm.list,
+                        Message::StoreListBrowserClose,
+                    ));
+                }
+                if self.store.generations_browser {
+                    let vm = self.store.vm(updates_auto.nix);
+                    if let Some(generations) = vm.generations {
+                        return Some(crate::package_ui::generations_dialog(
+                            generations,
+                            Message::StoreGenerationsBrowserClose,
+                        ));
+                    }
+                }
+            }
+            PackageTab::Apk => {
+                if self.packages.list_browser && self.packages.kind == Some(PackageKind::Apk) {
+                    let vm = self.packages.vm(PackageKind::Apk, updates_auto);
+                    return Some(crate::package_ui::list_dialog(
+                        vm.list,
+                        Message::PackageListBrowserClose,
+                    ));
+                }
+            }
+            PackageTab::Flatpak => {
+                if self.packages.list_browser && self.packages.kind == Some(PackageKind::Flatpak) {
+                    let vm = self.packages.vm(PackageKind::Flatpak, updates_auto);
+                    return Some(crate::package_ui::list_dialog(
+                        vm.list,
+                        Message::PackageListBrowserClose,
+                    ));
+                }
+            }
+        }
+        None
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
@@ -2693,6 +2767,11 @@ impl App {
     fn open_package_tab(&mut self, tab: PackageTab) -> Task<cosmic::Action<Message>> {
         self.screen = Screen::Packages;
         self.package_tab = tab;
+        // Browsers never survive a tab switch (the modal normally
+        // blocks the switcher; this keeps the flags honest anyway).
+        self.packages.list_browser = false;
+        self.store.list_browser = false;
+        self.store.generations_browser = false;
         match tab {
             PackageTab::Nix => self.load_store(),
             PackageTab::Apk => {
@@ -6301,6 +6380,9 @@ impl App {
     }
 
     fn request_store_action(&mut self, action: StoreAction) -> Task<cosmic::Action<Message>> {
+        // Acting from the browser closes it: the confirmation (or the
+        // job panel) lives on the page underneath.
+        self.store.list_browser = false;
         if self.store.pending.is_some() {
             self.store.error = Some(
                 "Finish or cancel the open confirmation before starting another action.".into(),
@@ -6513,6 +6595,9 @@ impl App {
     }
 
     fn request_rollback(&mut self) -> Task<cosmic::Action<Message>> {
+        // Rollback/Diff live inside the generations browser: close it
+        // so the confirmation underneath stays visible.
+        self.store.generations_browser = false;
         match self.parsed_generation() {
             Ok(generation) => self.request_store_action(StoreAction::Rollback(generation)),
             Err(error) => {
@@ -6523,6 +6608,7 @@ impl App {
     }
 
     fn request_diff(&mut self) -> Task<cosmic::Action<Message>> {
+        self.store.generations_browser = false;
         match self.parsed_generation() {
             Ok(generation) => self.request_store_action(StoreAction::DiffClosures(generation)),
             Err(error) => {

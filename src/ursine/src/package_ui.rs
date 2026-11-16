@@ -7,9 +7,9 @@
 //! hidden by its visibility flag, so moving a line moves it in every
 //! manager and a future manager only fills data.
 
-use cosmic::iced::Length;
+use cosmic::iced::{Length, Pixels};
 use cosmic::widget::{
-    button, column, row, scrollable, selectable_text, settings, text, text_input, toggler,
+    button, column, dialog, row, scrollable, selectable_text, settings, text, text_input, toggler,
 };
 use cosmic::Element;
 
@@ -98,6 +98,11 @@ pub struct FilterVm {
 
 pub struct ListVm<'a> {
     pub title: String,
+    /// True while the list lives in the half-page browser dialog: the
+    /// page then shows only a compact "open" row.
+    pub browsing: bool,
+    /// Opens the browser dialog.
+    pub browse: Message,
     /// Filter row rendered first inside the section.
     pub filter: Option<FilterVm>,
     /// Transient context rows (e.g. nix "Loading profile…").
@@ -137,6 +142,9 @@ pub struct PackageVm<'a> {
     pub pattern: PatternSection,
     pub list: ListVm<'a>,
     pub generations: Option<SectionVm<'a>>,
+    /// Generations live in the half-page browser dialog (nix only).
+    pub generations_browsing: bool,
+    pub generations_browse: Message,
 }
 
 // ---------------------------------------------------------------------------
@@ -211,6 +219,8 @@ pub fn view<'a>(vm: PackageVm<'a>) -> Element<'a, Message> {
         pattern,
         list,
         generations,
+        generations_browsing,
+        generations_browse,
     } = vm;
 
     let header = row(vec![
@@ -251,8 +261,19 @@ pub fn view<'a>(vm: PackageVm<'a>) -> Element<'a, Message> {
             SectionId::Search => search.take().map(search_section),
             SectionId::Repositories => repositories.take().map(section_block),
             SectionId::Pattern => pattern.take().map(pattern_section),
-            SectionId::Installed => list.take().map(list_section),
-            SectionId::Generations => generations.take().map(section_block),
+            SectionId::Installed => match list.take() {
+                Some(list) if list.browsing => Some(compact_list_section(&list)),
+                Some(list) => Some(list_section(list)),
+                None => None,
+            },
+            SectionId::Generations => match generations.take() {
+                Some(section) if generations_browsing => Some(compact_generations_section(
+                    section.title,
+                    generations_browse.clone(),
+                )),
+                Some(section) => Some(section_block(section)),
+                None => None,
+            },
         };
         if let Some(section) = section {
             items.push(section);
@@ -567,6 +588,60 @@ fn search_section(vm: SearchVm<'_>) -> Element<'_, Message> {
     section.into()
 }
 
+// ---------------------------------------------------------------------------
+// Half-page browsers (installed list / generations)
+// ---------------------------------------------------------------------------
+
+/// Compact page row while the list lives in the dialog.
+fn compact_list_section(list: &ListVm<'_>) -> Element<'static, Message> {
+    settings::section()
+        .title(list.title.clone())
+        .add(settings::item(
+            "List",
+            button::text("Open list…").on_press(list.browse.clone()),
+        ))
+        .into()
+}
+
+/// Compact page row while the generations live in the dialog.
+fn compact_generations_section(title: String, browse: Message) -> Element<'static, Message> {
+    settings::section()
+        .title(title)
+        .add(settings::item(
+            "History",
+            button::text("Browse generations…").on_press(browse),
+        ))
+        .into()
+}
+
+/// Half-page modal with an internal scroll — the browser for long
+/// lists (rendered by `Application::dialog`, centered over the page).
+fn browser_dialog(
+    title: String,
+    content: Element<'_, Message>,
+    close: Message,
+) -> Element<'_, Message> {
+    dialog()
+        .title(title)
+        .control(scrollable(content).height(Length::Fill))
+        .secondary_action(button::text("Close").on_press(close))
+        .width(Length::Fixed(900.0))
+        .max_height(Pixels(600.0))
+        .into()
+}
+
+/// The installed/search list as a half-page browser dialog.
+pub fn list_dialog(list: ListVm<'_>, close: Message) -> Element<'_, Message> {
+    let title = list.title.clone();
+    browser_dialog(title, list_section(list), close)
+}
+
+/// The nix generations as a half-page browser dialog.
+pub fn generations_dialog(section: SectionVm<'_>, close: Message) -> Element<'_, Message> {
+    let title = section.title.clone();
+    browser_dialog(title, column(section.items).spacing(8).into(), close)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -635,6 +710,8 @@ mod tests {
             },
             list: ListVm {
                 title: "Installed (0)".to_string(),
+                browsing: false,
+                browse: Message::PackageListBrowserClose,
                 filter: None,
                 status: Vec::new(),
                 empty_note: None,
@@ -645,6 +722,8 @@ mod tests {
                 title: "Generations".to_string(),
                 items: Vec::new(),
             }),
+            generations_browsing: false,
+            generations_browse: Message::StoreGenerationsBrowserClose,
         }
     }
 

@@ -92,6 +92,8 @@ pub struct PackagesState {
     pub pattern_result: Option<String>,
     /// Client-side filter over the installed/search list.
     pub installed_filter: String,
+    /// The installed list is shown in the half-page browser dialog.
+    pub list_browser: bool,
     /// (operation, pattern) waiting for confirmation.
     pub pending_pattern: Option<(PatternOp, String)>,
     pub error: Option<String>,
@@ -136,6 +138,7 @@ impl Default for PackagesState {
             pattern: String::new(),
             pattern_result: None,
             installed_filter: String::new(),
+            list_browser: false,
             pending_pattern: None,
             orphans: None,
             search_busy: false,
@@ -174,6 +177,7 @@ impl PackagesState {
         self.search_busy = false;
         self.pattern_result = None;
         self.installed_filter.clear();
+        self.list_browser = false;
         self.updates_checked = false;
         self.updates_checking = false;
         self.updates_seq = self.updates_seq.wrapping_add(1);
@@ -257,7 +261,7 @@ impl PackagesState {
     }
 
     /// Everything the shared view renders, as data for this manager.
-    fn vm(
+    pub(crate) fn vm(
         &self,
         kind: PackageKind,
         updates_auto: ursine_api::UpdatesAuto,
@@ -809,6 +813,8 @@ impl PackagesState {
             None
         };
         let list = ListVm {
+            browsing: self.list_browser,
+            browse: Message::PackageListBrowserOpen,
             title: format!(
                 "{} ({listed})",
                 if self.searching {
@@ -852,6 +858,9 @@ impl PackagesState {
             pattern,
             list,
             generations: None,
+            // No generations slot on apk/flatpak: never browsed.
+            generations_browsing: false,
+            generations_browse: Message::PackageListBrowserClose,
         }
     }
 }

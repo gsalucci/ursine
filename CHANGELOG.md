@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Half-page browsers** (user decision): the nix Generations list and
+  the Installed list of every package manager move into a centered
+  half-page dialog with its own scroll (opened from a compact
+  "Browse…/Open list…" row; `Application::dialog` renders it over the
+  page). Acting from inside the browser closes it first, so the
+  confirmation or job panel underneath stays visible.
+
 ## [0.37.0] — 2026-11-16
 
 ### Changed

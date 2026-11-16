@@ -370,6 +370,10 @@ pub struct StoreState {
     pub pattern_result: Option<String>,
     /// Client-side filter over the installed/search list.
     pub installed_filter: String,
+    /// The installed list is shown in the half-page browser dialog.
+    pub list_browser: bool,
+    /// The generations are shown in the half-page browser dialog.
+    pub generations_browser: bool,
     pub action_label: Option<String>,
     pub action_started: Option<std::time::Instant>,
 }
@@ -411,6 +415,8 @@ impl Default for StoreState {
             action_started: None,
             pattern_result: None,
             installed_filter: String::new(),
+            list_browser: false,
+            generations_browser: false,
         }
     }
 }
@@ -471,6 +477,8 @@ impl StoreState {
         self.action_message = None;
         self.pattern_result = None;
         self.installed_filter.clear();
+        self.list_browser = false;
+        self.generations_browser = false;
     }
 
     /// Start a search and return its fence. Stale replies must be ignored.
@@ -523,7 +531,7 @@ impl StoreState {
     }
 
     /// Everything the shared view renders, as data for this manager.
-    fn vm(&self, updates_auto: bool) -> crate::package_ui::PackageVm<'_> {
+    pub(crate) fn vm(&self, updates_auto: bool) -> crate::package_ui::PackageVm<'_> {
         use crate::package_ui::{
             ConfirmVm, ListVm, PackageVm, RefreshVm, RowVm, SearchVm, SectionVm, UpgradeAllVm,
             UpgradeVm,
@@ -926,6 +934,8 @@ impl StoreState {
         };
         let listed = rows.len();
         let list = ListVm {
+            browsing: self.list_browser,
+            browse: Message::StoreListBrowserOpen,
             filter: Some(crate::package_ui::FilterVm {
                 value: self.installed_filter.clone(),
                 on_input: Message::StoreFilterChanged,
@@ -1051,6 +1061,8 @@ impl StoreState {
             pattern,
             list,
             generations,
+            generations_browsing: self.generations_browser,
+            generations_browse: Message::StoreGenerationsBrowserOpen,
         }
     }
 }
