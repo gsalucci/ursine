@@ -16,6 +16,7 @@ use crate::modules::packages_nix::exec;
 
 pub(crate) const APK_CANDIDATES: [&str; 3] = ["/sbin/apk", "/usr/sbin/apk", "/usr/bin/apk"];
 const TIMEOUT: Duration = Duration::from_secs(300);
+/// Search rows only: installed and update lists are unlimited.
 const MAX_ROWS: usize = 300;
 
 pub async fn handle(action: &Action, ctx: &ModuleCtx<'_>) -> Result<serde_json::Value, ApiError> {
@@ -490,11 +491,7 @@ fn protected_names() -> Result<Vec<String>, ApiError> {
 fn parse_installed(versioned: &str, names: &str, protected: &[String]) -> Vec<ApkPackage> {
     let names: Vec<&str> = names.lines().filter(|line| !line.is_empty()).collect();
     let mut rows = Vec::new();
-    for line in versioned
-        .lines()
-        .filter(|line| !line.is_empty())
-        .take(MAX_ROWS)
-    {
+    for line in versioned.lines().filter(|line| !line.is_empty()) {
         let name = names
             .iter()
             .filter(|name| line.starts_with(&format!("{name}-")))
@@ -551,7 +548,6 @@ fn parse_updates(output: &str) -> Vec<ApkUpdate> {
                 available: available_version,
             })
         })
-        .take(MAX_ROWS)
         .collect()
 }
 
@@ -653,7 +649,9 @@ fn apk_path() -> Result<&'static str, ApiError> {
 
 async fn run(args: &[&str]) -> Result<String, ApiError> {
     let program = apk_path()?;
-    exec::run_root_program(program, args, TIMEOUT)
+    // Complete output: installed lists must never truncate (user
+    // decision: unlimited lists).
+    exec::run_root_program_complete(program, args, TIMEOUT)
         .await
         .map(|outcome| outcome.stdout)
 }
@@ -688,6 +686,16 @@ mod tests {
             origin_label("https://mirror.example/alpine/v3.24/main?foo=1#x", None),
             Some("v3.24 main".to_string())
         );
+    }
+
+    #[test]
+    fn parse_installed_keeps_every_row() {
+        // The old300-row cap silently dropped the tail of big systems.
+        let names: Vec<String> = (0..301).map(|i| format!("a{i}")).collect();
+        let versioned: Vec<String> = (0..301).map(|i| format!("a{i}-1.0")).collect();
+        let rows = parse_installed(&versioned.join("\n"), &names.join("\n"), &[]);
+        assert_eq!(rows.len(), 301);
+        assert_eq!(rows.last().map(|row| row.name.as_str()), Some("a300"));
     }
 
     #[test]

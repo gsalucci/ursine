@@ -164,8 +164,8 @@ pub const SECTIONS: [SectionId; 8] = [
     SectionId::Search,
     SectionId::Repositories,
     SectionId::Pattern,
-    SectionId::Installed,
     SectionId::Generations,
+    SectionId::Installed,
 ];
 
 impl PackageVm<'_> {
@@ -689,8 +689,8 @@ mod tests {
                 SectionId::Search,
                 SectionId::Repositories,
                 SectionId::Pattern,
-                SectionId::Installed,
                 SectionId::Generations,
+                SectionId::Installed,
             ]
         );
 

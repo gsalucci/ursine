@@ -178,7 +178,9 @@ pub(crate) fn validate_target_user(user: &str) -> Result<(), ApiError> {
 
 /// `nix search` emits one JSON document: truncating it would corrupt the
 /// parse. Allow a bounded but complete document instead.
-const MAX_SEARCH_OUTPUT: usize = 32 * 1024 * 1024;
+/// Byte budget for Complete-output runs: installed lists and JSON
+/// documents must arrive whole (user decision: unlimited lists).
+pub(crate) const MAX_COMPLETE_OUTPUT: usize = 32 * 1024 * 1024;
 
 /// How stdout/stderr are bounded while the command runs.
 #[derive(Clone)]
@@ -379,7 +381,7 @@ pub(super) async fn run_as_user_json(
         "nix",
         args,
         timeout,
-        OutputPolicy::Complete(MAX_SEARCH_OUTPUT),
+        OutputPolicy::Complete(MAX_COMPLETE_OUTPUT),
     )
     .await
 }
@@ -1040,6 +1042,7 @@ async fn run_root_program_guarded(
     program: &str,
     args: &[&str],
     timeout: Duration,
+    policy: OutputPolicy,
     guard: impl Fn(&str) -> bool,
 ) -> Result<CommandOutcome, ApiError> {
     if !is_safe_atom(program) {
@@ -1052,7 +1055,7 @@ async fn run_root_program_guarded(
         }
         cmd.arg(arg);
     }
-    let output = run_command(cmd, timeout, OutputPolicy::Truncate, None).await?;
+    let output = run_command(cmd, timeout, policy, None).await?;
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     if output.status.success() {
@@ -1075,9 +1078,27 @@ pub async fn run_root_program(
     args: &[&str],
     timeout: Duration,
 ) -> Result<CommandOutcome, ApiError> {
-    run_root_program_guarded(program, args, timeout, |arg| {
+    run_root_program_guarded(program, args, timeout, OutputPolicy::Truncate, |arg| {
         arg.is_empty() || arg.split(',').all(is_safe_atom)
     })
+    .await
+}
+
+/// Like [`run_root_program`] but keeps the WHOLE stdout (bounded at
+/// [`MAX_COMPLETE_OUTPUT`]): installed lists must never truncate
+/// (user decision: unlimited lists).
+pub async fn run_root_program_complete(
+    program: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<CommandOutcome, ApiError> {
+    run_root_program_guarded(
+        program,
+        args,
+        timeout,
+        OutputPolicy::Complete(MAX_COMPLETE_OUTPUT),
+        |arg| arg.is_empty() || arg.split(',').all(is_safe_atom),
+    )
     .await
 }
 
@@ -1091,7 +1112,7 @@ pub async fn run_root_program_value(
     args: &[&str],
     timeout: Duration,
 ) -> Result<CommandOutcome, ApiError> {
-    run_root_program_guarded(program, args, timeout, |arg| {
+    run_root_program_guarded(program, args, timeout, OutputPolicy::Truncate, |arg| {
         arg.is_empty() || is_safe_quoted_value(arg)
     })
     .await

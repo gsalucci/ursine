@@ -218,7 +218,7 @@ async fn profile_path(user: &str) -> Result<String, ApiError> {
 /// frontend never re-implements nix regex semantics.
 async fn regex_matches(user: &str, pattern: &str) -> Result<Vec<String>, ApiError> {
     exec::validate_regex(pattern)?;
-    let out = exec::run_as_user(
+    let out = exec::run_as_user_json(
         user,
         &[("profile", ""), ("list", ""), ("--json", "")],
         HISTORY_TIMEOUT,
@@ -625,7 +625,8 @@ pub async fn handle(action: &Action, ctx: &ModuleCtx<'_>) -> Result<serde_json::
             // timeout covers the whole handler, so a slow eval can only
             // ever eat leftover time — never push the reply over it.
             let deadline = Instant::now() + LIST_TIMEOUT;
-            let out = exec::run_as_user(
+            // Complete output: the installed list must never truncate.
+            let out = exec::run_as_user_json(
                 user,
                 &[("profile", ""), ("list", ""), ("--json", "")],
                 deadline.saturating_duration_since(Instant::now()),

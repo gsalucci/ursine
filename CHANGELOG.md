@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **Installed lists are unlimited** (user decision): the 300-row caps
+  are gone from apk/flatpak installed and update parsing, list
+  commands now keep their whole output (32 MiB bounded instead of a
+  64 KiB silent truncation), and the nix profile list uses the
+  complete-output runner — big systems no longer lose the tail of the
+  list (or corrupt apk's name/version pairing).
+- nix **Generations now render above Installed** in the canonical
+  section order (Scope → … → Pattern → Generations → Installed).
+
 ## [0.36.0] — 2026-11-16
 
 ### Added

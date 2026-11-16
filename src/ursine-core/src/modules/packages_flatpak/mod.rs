@@ -22,6 +22,7 @@ const FLATPAK_CANDIDATES: [&str; 3] = [
     "/var/lib/flatpak/exports/bin/flatpak",
 ];
 const TIMEOUT: Duration = Duration::from_mins(15);
+/// Search rows only: installed and update lists are unlimited.
 const MAX_ROWS: usize = 300;
 /// Shared column order for `flatpak list` / `flatpak remote-ls` rows —
 /// [`parse_list`] reads the fields positionally in exactly this order.
@@ -238,8 +239,6 @@ async fn list(system: bool, user: &str) -> Result<Vec<FlatpakPackage>, ApiError>
     )?;
     let mut rows = apps;
     rows.extend(runtimes);
-    // parse caps per query; the merged list keeps the single global cap.
-    rows.truncate(MAX_ROWS);
     Ok(rows)
 }
 
@@ -252,7 +251,6 @@ async fn updates(system: bool, user: &str) -> Result<Vec<FlatpakPackage>, ApiErr
     )?;
     let mut rows = apps;
     rows.extend(runtimes);
-    rows.truncate(MAX_ROWS);
     Ok(rows)
 }
 
@@ -338,11 +336,7 @@ async fn search(query: &str, system: bool, user: &str) -> Result<Vec<FlatpakPack
 /// Parse tab rows in [`LIST_COLUMNS`] order (shared by list and updates).
 fn parse_list(output: &str, system: bool, kind: FlatpakRefKind) -> Vec<FlatpakPackage> {
     let mut rows = Vec::new();
-    for line in output
-        .lines()
-        .filter(|line| !line.is_empty())
-        .take(MAX_ROWS)
-    {
+    for line in output.lines().filter(|line| !line.is_empty()) {
         let mut fields = line.split('\t');
         let (Some(app_id), Some(name), Some(version), Some(branch), Some(origin)) = (
             fields.next(),
@@ -604,10 +598,13 @@ fn parse_unused(stdout: &str) -> u64 {
 
 async fn run(system: bool, user: &str, args: &[&str]) -> Result<String, ApiError> {
     let program = flatpak_path()?;
+    // Complete output: installed/update lists must never truncate
+    // (user decision: unlimited lists).
     let outcome = if system {
-        exec::run_root_program(program, args, TIMEOUT).await?
+        exec::run_root_program_complete(program, args, TIMEOUT).await?
     } else {
-        exec::run_as_user_argv(user, program, args, TIMEOUT).await?
+        exec::run_as_user_argv_bounded(user, program, args, TIMEOUT, exec::MAX_COMPLETE_OUTPUT)
+            .await?
     };
     Ok(outcome.stdout)
 }
@@ -663,6 +660,21 @@ Is that ok? [y/N] ";
             .unwrap()
             .is_empty());
         assert!(matching_app_ids("bad'quote", packages).is_err());
+    }
+
+    #[test]
+    fn parse_list_keeps_every_installed_row() {
+        // The old300-row cap silently dropped the tail of big systems.
+        let output = (0..301)
+            .map(|i| format!("org.test.P{i}\tP{i}\t1.0\tstable\tflathub\tdescription {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let rows = parse_list(&output, false, FlatpakRefKind::App);
+        assert_eq!(rows.len(), 301);
+        assert_eq!(
+            rows.last().map(|row| row.app_id.as_str()),
+            Some("org.test.P300")
+        );
     }
 
     #[test]
