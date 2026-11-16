@@ -88,6 +88,10 @@ pub struct PackagesState {
     pub search_busy: bool,
     /// Pattern-actions input (regex over installed names).
     pub pattern: String,
+    /// Inline preview result of the last pattern dry-run.
+    pub pattern_result: Option<String>,
+    /// Client-side filter over the installed/search list.
+    pub installed_filter: String,
     /// (operation, pattern) waiting for confirmation.
     pub pending_pattern: Option<(PatternOp, String)>,
     pub error: Option<String>,
@@ -130,6 +134,8 @@ impl Default for PackagesState {
             updates_checking: false,
             updates_seq: 0,
             pattern: String::new(),
+            pattern_result: None,
+            installed_filter: String::new(),
             pending_pattern: None,
             orphans: None,
             search_busy: false,
@@ -166,6 +172,8 @@ impl PackagesState {
         self.flatpak_remotes.clear();
         self.searching = false;
         self.search_busy = false;
+        self.pattern_result = None;
+        self.installed_filter.clear();
         self.updates_checked = false;
         self.updates_checking = false;
         self.updates_seq = self.updates_seq.wrapping_add(1);
@@ -255,8 +263,8 @@ impl PackagesState {
         updates_auto: ursine_api::UpdatesAuto,
     ) -> crate::package_ui::PackageVm<'_> {
         use crate::package_ui::{
-            ConfirmVm, ListVm, PackageVm, RefreshVm, RowVm, SearchVm, SectionVm, UpgradeAllVm,
-            UpgradeVm,
+            ConfirmVm, FilterVm, ListVm, PackageVm, RefreshVm, RowVm, SearchVm, SectionVm,
+            UpgradeAllVm, UpgradeVm,
         };
 
         let manager = match kind {
@@ -647,7 +655,10 @@ impl PackagesState {
             preview: Message::PackagePatternPreviewRequested,
             upgrade: Message::PackagePatternApplyRequested(PatternOp::Upgrade),
             remove: Message::PackagePatternApplyRequested(PatternOp::Remove),
-            armed: !self.pattern.trim().is_empty() && !self.busy && !self.action_busy,
+            // Clicks fire whenever a pattern exists; blocked guards
+            // answer with a copyable error instead of silence.
+            armed: !self.pattern.trim().is_empty(),
+            result: self.pattern_result.clone(),
         };
 
         // --- Bottom list (Installed / search results) ---
@@ -778,9 +789,16 @@ impl PackagesState {
                 })
                 .collect(),
         };
+        // Filter first: the notes and the count describe what is shown.
+        let query = self.installed_filter.trim().to_lowercase();
+        let rows: Vec<RowVm<'_>> = rows
+            .into_iter()
+            .filter(|row| row.title.to_lowercase().contains(&query))
+            .collect();
+        let filtering = !query.is_empty();
         let listed = rows.len();
         let empty_note = if rows.is_empty() {
-            if self.searching {
+            if filtering || self.searching {
                 Some(("No matches".to_string(), "No packages matched.".to_string()))
             } else if !self.busy {
                 Some(("Result".to_string(), "No packages installed.".to_string()))
@@ -799,6 +817,10 @@ impl PackagesState {
                     "Installed"
                 }
             ),
+            filter: Some(FilterVm {
+                value: self.installed_filter.clone(),
+                on_input: Message::PackageFilterChanged,
+            }),
             status: Vec::new(),
             empty_note,
             rows,

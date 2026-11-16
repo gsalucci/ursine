@@ -366,6 +366,10 @@ pub struct StoreState {
     pub pending: Option<PendingStoreAction>,
     pub action_busy: bool,
     pub action_message: Option<String>,
+    /// Inline pattern-preview result (regex dry-run).
+    pub pattern_result: Option<String>,
+    /// Client-side filter over the installed/search list.
+    pub installed_filter: String,
     pub action_label: Option<String>,
     pub action_started: Option<std::time::Instant>,
 }
@@ -405,6 +409,8 @@ impl Default for StoreState {
             action_message: None,
             action_label: None,
             action_started: None,
+            pattern_result: None,
+            installed_filter: String::new(),
         }
     }
 }
@@ -463,6 +469,8 @@ impl StoreState {
         self.pending = None;
         self.prune_preview = None;
         self.action_message = None;
+        self.pattern_result = None;
+        self.installed_filter.clear();
     }
 
     /// Start a search and return its fence. Stale replies must be ignored.
@@ -800,13 +808,16 @@ impl StoreState {
                 pattern: self.regex.trim().to_string(),
                 dry_run: false,
             }),
-            armed: enabled && !self.regex.trim().is_empty() && !self.action_busy,
+            // Clicks fire whenever a pattern exists; the store
+            // handler answers blocked guards with a copyable error.
+            armed: !self.regex.trim().is_empty(),
+            result: self.pattern_result.clone(),
         };
 
         // --- Bottom list: search results while a search is done,
         // otherwise the installed profile (apk pattern) ---
         let showing_results = self.search_done;
-        let rows: Vec<RowVm<'_>> = if showing_results {
+        let raw_rows: Vec<RowVm<'_>> = if showing_results {
             self.search_results
                 .iter()
                 .map(|result| RowVm {
@@ -880,8 +891,14 @@ impl StoreState {
                 })
                 .collect()
         };
+        let query = self.installed_filter.trim().to_lowercase();
+        let rows: Vec<RowVm<'_>> = raw_rows
+            .into_iter()
+            .filter(|row| row.title.to_lowercase().contains(&query))
+            .collect();
+        let filtering = !query.is_empty();
         let empty_note = if rows.is_empty() {
-            if showing_results {
+            if filtering || showing_results {
                 Some(("No matches".to_string(), "No packages matched.".to_string()))
             } else if !self.busy {
                 Some(("Result".to_string(), "No packages installed.".to_string()))
@@ -907,18 +924,20 @@ impl StoreState {
             )
             .into()]
         };
+        let listed = rows.len();
         let list = ListVm {
+            filter: Some(crate::package_ui::FilterVm {
+                value: self.installed_filter.clone(),
+                on_input: Message::StoreFilterChanged,
+            }),
             title: if showing_results {
                 if self.search_truncated {
-                    format!(
-                        "Search results (first {} of more — narrow the query)",
-                        self.search_results.len()
-                    )
+                    format!("Search results (first {listed} of more — narrow the query)")
                 } else {
-                    format!("Search results ({})", self.search_results.len())
+                    format!("Search results ({listed})")
                 }
             } else {
-                format!("Installed ({})", self.packages.len())
+                format!("Installed ({listed})")
             },
             status,
             empty_note,
@@ -1252,6 +1271,21 @@ fn flake_to_https(reference: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn regex_preview_summary_lists_matches() {
+        let value =
+            serde_json::json!({"dry_run": true, "would_change": ["python3-a", "python3-b"]});
+        assert_eq!(
+            regex_preview_summary(&value),
+            "Matching packages: python3-a, python3-b."
+        );
+        let empty = serde_json::json!({"dry_run": true, "would_change": []});
+        assert_eq!(
+            regex_preview_summary(&empty),
+            "No installed package matches."
+        );
+    }
 
     #[test]
     fn flake_refs_become_https_links() {

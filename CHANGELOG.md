@@ -18,6 +18,9 @@
 
 ### Added
 
+- **Filter row in the installed list** of every package manager: type
+  to narrow the rows (installed or search results) client-side; an
+  empty result shows the shared `No matches` note.
 - flatpak **orphan count**: the Maintenance row shows
   `Remove orphans… (N)` from a read-only probe
   (`flatpak uninstall --unused` always answered `n` — the plan is
@@ -30,6 +33,12 @@
 
 ### Changed
 
+- Pattern **preview results render inline** under the Preview/
+  Upgrade/Remove buttons in all three managers (the result used to
+  appear only at the top of the page, out of view), and a blocked
+  pattern click (busy, pending confirmation, empty pattern, profile
+  not loaded) now answers with a copyable error instead of doing
+  nothing silently. Regex matchers are covered by new unit tests.
 - Alignment pass across the three package views (user decision):
   list-row buttons (Install/Upgrade/Remove) are guarded against busy
   states everywhere (apk/flatpak used raw presses), Direct install

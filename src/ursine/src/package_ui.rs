@@ -90,8 +90,16 @@ pub struct SearchVm<'a> {
 }
 
 /// Bottom list section (Installed or search results — the title says).
+/// Client-side filter over whatever the list currently shows.
+pub struct FilterVm {
+    pub value: String,
+    pub on_input: fn(String) -> Message,
+}
+
 pub struct ListVm<'a> {
     pub title: String,
+    /// Filter row rendered first inside the section.
+    pub filter: Option<FilterVm>,
     /// Transient context rows (e.g. nix "Loading profile…").
     pub status: Vec<(String, String)>,
     /// Shown when there are no rows (label, text) — data decides when.
@@ -317,14 +325,17 @@ pub struct PatternSection {
     pub preview: Message,
     pub upgrade: Message,
     pub remove: Message,
-    /// Buttons fire only while armed (pattern present, nothing busy).
+    /// Clicks are always attempted when a pattern exists; blocked
+    /// guards answer with a copyable error instead of silence.
     pub armed: bool,
+    /// Inline preview result shown right under the buttons.
+    pub result: Option<String>,
 }
 
 /// The Pattern-actions block every manager shares: hint, regex input,
 /// then Preview/Upgrade/Remove in one row.
 fn pattern_section(spec: PatternSection) -> Element<'static, Message> {
-    settings::section()
+    let mut section = settings::section()
         .title("Pattern actions")
         .add(settings::item("Package pattern", text(spec.hint)))
         .add(settings::item(
@@ -347,8 +358,11 @@ fn pattern_section(spec: PatternSection) -> Element<'static, Message> {
                     .into(),
             ])
             .spacing(8),
-        ))
-        .into()
+        ));
+    if let Some(result) = spec.result {
+        section = section.add(settings::item("Result", selectable_text(result)));
+    }
+    section.into()
 }
 
 /// The three Upgrade-section control rows every manager shares:
@@ -445,6 +459,14 @@ fn row_block(vm: RowVm<'_>) -> Element<'_, Message> {
 
 fn list_section(list: ListVm<'_>) -> Element<'_, Message> {
     let mut section = settings::section().title(list.title);
+    if let Some(filter) = &list.filter {
+        section = section.add(settings::item(
+            "Filter",
+            text_input("Type to filter…", filter.value.clone())
+                .on_input(filter.on_input)
+                .width(Length::Fill),
+        ));
+    }
     for (label, value) in list.status {
         section = section.add(settings::item(label, text(value)));
     }
@@ -609,9 +631,11 @@ mod tests {
                 upgrade: Message::PackagePatternApplyRequested(PatternOp::Upgrade),
                 remove: Message::PackagePatternApplyRequested(PatternOp::Remove),
                 armed: false,
+                result: None,
             },
             list: ListVm {
                 title: "Installed (0)".to_string(),
+                filter: None,
                 status: Vec::new(),
                 empty_note: None,
                 rows: Vec::new(),

@@ -212,9 +212,15 @@ const fn scope(system: bool) -> &'static str {
 
 /// Installed Flatpak refs matching `pattern` (id or human name).
 async fn matched_app_ids(pattern: &str, system: bool, user: &str) -> Result<Vec<String>, ApiError> {
+    let packages = list(system, user).await?;
+    matching_app_ids(pattern, packages)
+}
+
+/// Validate + compile once, then keep the refs whose app id OR human
+/// name the regex matches (pure — the test suite drives it directly).
+fn matching_app_ids(pattern: &str, packages: Vec<FlatpakPackage>) -> Result<Vec<String>, ApiError> {
     exec::validate_regex(pattern)?;
     let re = regex::Regex::new(pattern).map_err(|_| ApiError::invalid("invalid regex pattern"))?;
-    let packages = list(system, user).await?;
     Ok(packages
         .into_iter()
         .filter(|package| re.is_match(&package.app_id) || re.is_match(&package.name))
@@ -626,6 +632,37 @@ Is that ok? [y/N] ";
 
         assert_eq!(parse_unused("Nothing unused to uninstall\n"), 0);
         assert_eq!(parse_unused(""), 0);
+    }
+
+    #[test]
+    fn regex_matches_app_ids_and_names() {
+        let package = |app_id: &str, name: &str| FlatpakPackage {
+            app_id: app_id.to_string(),
+            name: name.to_string(),
+            version: "1".to_string(),
+            branch: "stable".to_string(),
+            origin: "flathub".to_string(),
+            description: None,
+            system: false,
+            kind: FlatpakRefKind::App,
+        };
+        let packages = vec![
+            package("org.gnome.Calculator", "Calculator"),
+            package("com.bitwarden.desktop", "Bitwarden"),
+        ];
+        assert_eq!(
+            matching_app_ids("^org[.]gnome", packages.clone()).unwrap(),
+            ["org.gnome.Calculator"]
+        );
+        // Human names match too (the documented flatpak behaviour).
+        assert_eq!(
+            matching_app_ids("^(Calc|Bit)", packages.clone()).unwrap(),
+            ["org.gnome.Calculator", "com.bitwarden.desktop"]
+        );
+        assert!(matching_app_ids("^nothing$", packages.clone())
+            .unwrap()
+            .is_empty());
+        assert!(matching_app_ids("bad'quote", packages).is_err());
     }
 
     #[test]

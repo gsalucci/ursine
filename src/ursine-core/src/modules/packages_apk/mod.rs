@@ -594,9 +594,15 @@ async fn search(query: &str) -> Result<Vec<ApkPackage>, ApiError> {
 
 /// Installed package names matching `pattern` (validate + compile once).
 async fn matched_names(pattern: &str) -> Result<Vec<String>, ApiError> {
+    let packages = installed().await?;
+    matching_names(pattern, packages)
+}
+
+/// Validate + compile once, then keep the installed names the regex
+/// matches (pure — the test suite drives it directly).
+fn matching_names(pattern: &str, packages: Vec<ApkPackage>) -> Result<Vec<String>, ApiError> {
     exec::validate_regex(pattern)?;
     let re = regex::Regex::new(pattern).map_err(|_| ApiError::invalid("invalid regex pattern"))?;
-    let packages = installed().await?;
     Ok(packages
         .into_iter()
         .filter(|package| re.is_match(&package.name))
@@ -682,6 +688,31 @@ mod tests {
             origin_label("https://mirror.example/alpine/v3.24/main?foo=1#x", None),
             Some("v3.24 main".to_string())
         );
+    }
+
+    #[test]
+    fn regex_matches_installed_names() {
+        let package = |name: &str| ApkPackage {
+            id: format!("{name}-1"),
+            name: name.to_string(),
+            version: "1".to_string(),
+            description: None,
+            protected: false,
+            origin: None,
+            origin_label: None,
+        };
+        let packages = vec![package("libfoo"), package("bash"), package("libbar")];
+        assert_eq!(
+            matching_names("^lib", packages.clone()).unwrap(),
+            ["libfoo", "libbar"]
+        );
+        assert_eq!(matching_names("bash$", packages.clone()).unwrap(), ["bash"]);
+        assert!(matching_names("^nothing$", packages.clone())
+            .unwrap()
+            .is_empty());
+        // The shared validator rejects unsafe patterns before compiling.
+        assert!(matching_names("bad'quote", packages).is_err());
+        assert!(matching_names("bad;rm", vec![package("x")]).is_err());
     }
 
     #[test]

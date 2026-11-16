@@ -1353,6 +1353,9 @@ mod tests {
         assert!(validate_regex("bad;rm").is_err());
         assert!(validate_regex("back`tick").is_err());
         assert!(validate_regex("").is_err());
+        assert!(validate_regex(&"a".repeat(257)).is_err());
+        assert!(validate_regex("line\nbreak").is_err());
+        assert!(validate_regex("^lib.*").is_ok());
     }
 
     #[test]

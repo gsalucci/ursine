@@ -185,6 +185,8 @@ pub enum Message {
     NixUpdatesRequested,
     /// Pattern-actions input changed (regex over installed names).
     PackagePatternChanged(String),
+    /// Client-side filter over the installed/search list.
+    PackageFilterChanged(String),
     /// Dry-run the pattern against the installed list.
     PackagePatternPreviewRequested,
     /// Pattern preview finished (`would_change` names).
@@ -499,6 +501,8 @@ pub enum Message {
     StoreSearchLoaded(u64, u64, StoreScope, Result<SearchPage, ApiError>),
     StoreInstallChanged(String),
     StoreRegexChanged(String),
+    /// Client-side filter over the installed/search list.
+    StoreFilterChanged(String),
     StoreGenerationChanged(String),
     StoreKeepChanged(String),
     StoreKeepPreset(usize),
@@ -704,14 +708,25 @@ impl cosmic::Application for App {
             }
             Message::PackageUpdatesRefreshRequested => return self.refresh_package_updates(),
             Message::NixUpdatesRequested => return self.request_nix_updates(),
-            Message::PackagePatternChanged(value) => self.packages.pattern = value,
+            Message::PackagePatternChanged(value) => {
+                self.packages.pattern = value;
+                // The preview belonged to the previous pattern.
+                self.packages.pattern_result = None;
+            }
+            Message::PackageFilterChanged(value) => self.packages.installed_filter = value,
             Message::PackagePatternPreviewRequested => return self.request_pattern_preview(),
             Message::PackagePatternPreviewFinished(epoch, result) => {
                 return self.finish_pattern_preview(epoch, result)
             }
             Message::PackagePatternApplyRequested(op) => {
                 let pattern = self.packages.pattern.trim().to_string();
-                if !pattern.is_empty() && !self.packages.action_busy && !self.packages.busy {
+                // Blocked clicks answer with a copyable error instead
+                // of doing nothing.
+                if pattern.is_empty() {
+                    self.packages.error = Some("Enter a pattern.".into());
+                } else if self.packages.action_busy || self.packages.busy {
+                    self.packages.error = Some("Wait for the current operation to finish.".into());
+                } else {
                     self.packages.pending_pattern = Some((op, pattern));
                 }
             }
@@ -1920,7 +1935,11 @@ impl cosmic::Application for App {
                 self.finish_store_search(epoch, seq, &scope, result);
             }
             Message::StoreInstallChanged(value) => self.store.install_input = value,
-            Message::StoreRegexChanged(value) => self.store.regex = value,
+            Message::StoreFilterChanged(value) => self.store.installed_filter = value,
+            Message::StoreRegexChanged(value) => {
+                self.store.regex = value;
+                self.store.pattern_result = None;
+            }
             Message::StoreGenerationChanged(value) => self.store.generation_input = value,
             Message::StoreKeepChanged(value) => {
                 // A different keep count needs its own preview.
@@ -5868,11 +5887,18 @@ impl App {
             return Task::none();
         };
         let pattern = self.packages.pattern.trim().to_string();
-        if pattern.is_empty()
-            || self.packages.busy
-            || self.packages.action_busy
-            || self.packages.pending_pattern.is_some()
-        {
+        // Blocked clicks answer with a copyable error instead of
+        // doing nothing (the old guards returned silently).
+        if pattern.is_empty() {
+            self.packages.error = Some("Enter a pattern.".into());
+            return Task::none();
+        }
+        if self.packages.busy || self.packages.action_busy {
+            self.packages.error = Some("Wait for the current operation to finish.".into());
+            return Task::none();
+        }
+        if self.packages.pending_pattern.is_some() {
+            self.packages.error = Some("Finish or cancel the open confirmation first.".into());
             return Task::none();
         }
         self.packages.action_busy = true;
@@ -5897,10 +5923,13 @@ impl App {
         epoch: u64,
         result: Result<serde_json::Value, ApiError>,
     ) -> Task<cosmic::Action<Message>> {
+        // Clear the busy flag even for a superseded reply: otherwise
+        // the pattern flow stays locked on "Wait for the current
+        // operation to finish." forever.
+        self.packages.action_busy = false;
         if epoch != self.epoch {
             return Task::none();
         }
-        self.packages.action_busy = false;
         match result {
             Ok(value) => {
                 // Same wording as the nix preview (shared schema).
@@ -5915,7 +5944,9 @@ impl App {
                             .join(", ")
                     })
                     .unwrap_or_default();
-                self.packages.message = Some(if names.is_empty() {
+                // Inline under the Pattern buttons — the result must
+                // be visible where the click happened.
+                self.packages.pattern_result = Some(if names.is_empty() {
                     "No installed package matches.".to_string()
                 } else {
                     format!("Matching packages: {names}.")
@@ -5951,6 +5982,7 @@ impl App {
         };
         let kind = self.packages.kind.unwrap_or(PackageKind::Apk);
         self.packages.action_busy = true;
+        self.packages.pattern_result = None;
         self.packages.error = None;
         self.packages.message = None;
         let token = session.token.clone();
@@ -6299,6 +6331,14 @@ impl App {
             }
         }
         let scope = self.store.current_scope();
+        // A regex APPLY makes the old inline preview stale.
+        if matches!(
+            action,
+            StoreAction::RemoveRegex { dry_run: false, .. }
+                | StoreAction::UpgradeRegex { dry_run: false, .. }
+        ) {
+            self.store.pattern_result = None;
+        }
         if action.requires_confirmation_in(&scope) {
             self.store.pending = Some(PendingStoreAction { action, scope });
             return Task::none();
@@ -6427,11 +6467,21 @@ impl App {
                     // Any other completed action can move generations.
                     self.store.prune_preview = None;
                 }
-                self.store.action_message = Some(format!(
-                    "{}: {}",
-                    action.target_label(scope),
-                    crate::store::summarize(action, &value)
-                ));
+                if matches!(
+                    action,
+                    StoreAction::RemoveRegex { dry_run: true, .. }
+                        | StoreAction::UpgradeRegex { dry_run: true, .. }
+                ) {
+                    // Regex previews render inline under the Pattern
+                    // buttons (same shape as apk/flatpak).
+                    self.store.pattern_result = Some(crate::store::summarize(action, &value));
+                } else {
+                    self.store.action_message = Some(format!(
+                        "{}: {}",
+                        action.target_label(scope),
+                        crate::store::summarize(action, &value)
+                    ));
+                }
                 if action.reloads_profile() {
                     return self.load_store();
                 }
