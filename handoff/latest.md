@@ -6,6 +6,15 @@
 See `state/session-state.json` for current goals, decisions, risks, and next actions.
 See `AGENTS.md` for project context and milestone history.
 
+## Session 2026-11-16 (b) — unlimited lists + search, Generations order, release 0.37.0 (main, tag `v0.37.0`)
+
+**Status**: Pushed through `b5426f3`; tag CI `43906543519`/`43906543937` success, feature CI `43903607405` success (one rustdoc failure on `d796101` — intra-doc link to pub(crate) const — fixed in `167105f`, `cargo doc -D warnings` now run locally before push). Auto-pin `6d199d0` pulled, HEAD `6d199d0`.
+
+- **Unlimited installed lists (`7409a4a`)**: 300-row caps removed (apk installed+updates, flatpak list+merges+updates), list reads use complete-output runners (new `run_root_program_complete`, flatpak user via `run_as_user_argv_bounded`, nix profile list via `run_as_user_json`) instead of silent 64 KiB truncation; `MAX_ROWS` documented search-only; Generations moved ABOVE Installed in `SECTIONS` + alignment test; 301-row fixture tests for apk/flatpak parsers.
+- **Unlimited search results (`d796101`)**: apk inline search loop + flatpak `parse_search` caps removed, `MAX_ROWS` const deleted entirely; nix keeps documented 200 + "first N of more" (slow eval by design). flatpak 301-row search test.
+- User confirmed the installed Filter row now searches ALL packages (it filters the unlimited rows).
+- Gates green each commit; docs/typos green; one one-off SIGABRT in the suite under load (not reproduced, 2 greens after).
+
 ## Session 2026-11-16 — GUI fusion cleanup, alignment, filter + inline preview, release 0.36.0 (main, tag `v0.36.0`)
 
 **Status**: Pushed through `9d07385`; auto-pin `f1d69d8` pulled, local HEAD `f1d69d8`. Tag `v0.36.0` = `e8a1653`, tag CI `43859083527` success, HEAD CI `43859782552` success (intermediate main runs cancelled by concurrency = normal). Transient push/keyring hang recurred once; retry with GIT_TRACE succeeded.
