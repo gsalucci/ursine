@@ -16,8 +16,6 @@ use crate::modules::packages_nix::exec;
 
 pub(crate) const APK_CANDIDATES: [&str; 3] = ["/sbin/apk", "/usr/sbin/apk", "/usr/bin/apk"];
 const TIMEOUT: Duration = Duration::from_secs(300);
-/// Search rows only: installed and update lists are unlimited.
-const MAX_ROWS: usize = 300;
 
 pub async fn handle(action: &Action, ctx: &ModuleCtx<'_>) -> Result<serde_json::Value, ApiError> {
     match action {
@@ -564,11 +562,7 @@ async fn search(query: &str) -> Result<Vec<ApkPackage>, ApiError> {
     }
     let output = run(&["search", "-v", query]).await?;
     let mut rows = Vec::new();
-    for line in output
-        .lines()
-        .filter(|line| !line.is_empty())
-        .take(MAX_ROWS)
-    {
+    for line in output.lines().filter(|line| !line.is_empty()) {
         let (id, description) = line
             .split_once(" - ")
             .map_or((line, None), |(id, description)| {

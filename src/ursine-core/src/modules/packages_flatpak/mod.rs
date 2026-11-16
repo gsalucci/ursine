@@ -22,8 +22,6 @@ const FLATPAK_CANDIDATES: [&str; 3] = [
     "/var/lib/flatpak/exports/bin/flatpak",
 ];
 const TIMEOUT: Duration = Duration::from_mins(15);
-/// Search rows only: installed and update lists are unlimited.
-const MAX_ROWS: usize = 300;
 /// Shared column order for `flatpak list` / `flatpak remote-ls` rows —
 /// [`parse_list`] reads the fields positionally in exactly this order.
 const LIST_COLUMNS: &str = "application,name,version,branch,origin,description";
@@ -367,11 +365,7 @@ fn parse_list(output: &str, system: bool, kind: FlatpakRefKind) -> Vec<FlatpakPa
 
 fn parse_search(output: &str, system: bool) -> Vec<FlatpakPackage> {
     let mut rows = Vec::new();
-    for line in output
-        .lines()
-        .filter(|line| !line.is_empty())
-        .take(MAX_ROWS)
-    {
+    for line in output.lines().filter(|line| !line.is_empty()) {
         let mut fields = line.split('\t');
         let (Some(app_id), Some(name), Some(version), Some(description)) =
             (fields.next(), fields.next(), fields.next(), fields.next())
@@ -675,6 +669,16 @@ Is that ok? [y/N] ";
             rows.last().map(|row| row.app_id.as_str()),
             Some("org.test.P300")
         );
+    }
+
+    #[test]
+    fn parse_search_keeps_every_result() {
+        let output = (0..301)
+            .map(|i| format!("org.test.S{i}\tS{i}\t1.0\tdescription {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let rows = parse_search(&output, false);
+        assert_eq!(rows.len(), 301);
     }
 
     #[test]

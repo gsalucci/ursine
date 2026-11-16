@@ -12,6 +12,10 @@
   list (or corrupt apk's name/version pairing).
 - nix **Generations now render above Installed** in the canonical
   section order (Scope → … → Pattern → Generations → Installed).
+- **Search results are unlimited too** (user decision): apk and
+  flatpak no longer cap query results at 300 rows (nix keeps its
+  documented 200 + "first N of more" notice — nixpkgs evaluation is
+  slow by nature).
 
 ## [0.36.0] — 2026-11-16
 
