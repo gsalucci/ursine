@@ -48,15 +48,35 @@ pub async fn handle(action: &Action, ctx: &ModuleCtx<'_>) -> Result<serde_json::
         }
         Action::RemoveApkRepository { url } => {
             validate_repo_url(url)?;
+            let copies = crate::backup_configs::copies_from(&ctx.config);
             let path = repositories_path();
             let content = read_repositories(path)?;
-            let updated = remove_repository(&content, url)?;
-            write_repositories(
-                path,
-                &updated,
-                crate::backup_configs::copies_from(&ctx.config),
-            )
-            .await?;
+            match remove_repository(&content, url) {
+                Ok(updated) => write_repositories(path, &updated, copies).await?,
+                Err(not_found) => {
+                    // Lines in repositories.d are rewritten in their
+                    // own fragment file, never in the main file.
+                    let mut removed = false;
+                    for fragment in fragment_paths() {
+                        let Ok(content) = std::fs::read_to_string(&fragment) else {
+                            continue;
+                        };
+                        if content.len() > 64 * 1024 {
+                            continue;
+                        }
+                        let Ok(updated) = remove_repository(&content, url) else {
+                            continue;
+                        };
+                        let fragment = fragment.to_string_lossy().into_owned();
+                        write_repositories(&fragment, &updated, copies).await?;
+                        removed = true;
+                        break;
+                    }
+                    if !removed {
+                        return Err(not_found);
+                    }
+                }
+            }
             run(&["update"]).await?;
             Ok(json!({"repositories": repositories()?}))
         }
@@ -161,6 +181,9 @@ fn start_job(
 }
 
 const REPOSITORIES_PATH: &str = "/etc/apk/repositories";
+/// Fragment files (`FeralOS` splits repository definitions here); they
+/// join the LIST and can hold lines that Remove rewrites in place.
+const REPOSITORIES_DIR: &str = "/etc/apk/repositories.d";
 
 fn repositories_path() -> &'static str {
     REPOSITORIES_PATH
@@ -192,7 +215,35 @@ fn split_repo_line(line: &str) -> (Option<String>, String) {
 }
 
 fn repositories() -> Result<Vec<ApkRepository>, ApiError> {
-    Ok(repositories_from(&read_repositories(repositories_path())?))
+    let mut all = repositories_from(&read_repositories(repositories_path())?);
+    for path in fragment_paths() {
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if content.len() > 64 * 1024 {
+            continue;
+        }
+        all.extend(repositories_from(&content));
+    }
+    Ok(all)
+}
+
+/// Sorted regular files under `/etc/apk/repositories.d` (a missing
+/// directory simply yields none).
+fn fragment_paths() -> Vec<std::path::PathBuf> {
+    let Ok(entries) = std::fs::read_dir(REPOSITORIES_DIR) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<std::path::PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        // Real files only: the atomic rewrite replaces the path, so a
+        // symlinked fragment must not be listed (its removal could not
+        // be performed in place).
+        .filter(|path| path.is_file() && !path.is_symlink())
+        .collect();
+    paths.sort();
+    paths
 }
 
 fn repositories_from(content: &str) -> Vec<ApkRepository> {
@@ -205,7 +256,11 @@ fn repositories_from(content: &str) -> Vec<ApkRepository> {
             if url.is_empty() {
                 return None;
             }
-            Some(ApkRepository { url, tag })
+            let label = tag.as_deref().map_or_else(
+                || origin_label(&url, None).unwrap_or_else(|| url.clone()),
+                |tag| format!("@{tag}"),
+            );
+            Some(ApkRepository { url, label, tag })
         })
         .collect()
 }
@@ -635,8 +690,10 @@ mod tests {
         assert_eq!(parsed.len(), 2);
         assert_eq!(parsed[0].tag.as_deref(), Some("edge"));
         assert_eq!(parsed[0].url, "http://a/edge/main");
+        assert_eq!(parsed[0].label, "@edge");
         assert_eq!(parsed[1].tag, None);
         assert_eq!(parsed[1].url, "http://b/v3/main");
+        assert_eq!(parsed[1].label, "v3 main");
     }
 
     #[test]

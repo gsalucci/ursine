@@ -2748,6 +2748,7 @@ impl App {
         }
         self.packages.busy = true;
         self.packages.searching = false;
+        self.packages.search_busy = false;
         self.packages.error = None;
         // A fresh load invalidates the previous count until the check
         // (automatic when the preference is on) completes.
@@ -3099,6 +3100,7 @@ impl App {
             return Task::none();
         }
         self.packages.busy = false;
+        self.packages.search_busy = false;
         match result {
             Ok(packages) => {
                 self.packages.apply_apk(packages);
@@ -3123,6 +3125,7 @@ impl App {
             return Task::none();
         }
         self.packages.busy = false;
+        self.packages.search_busy = false;
         match result {
             Ok(packages) => {
                 self.packages.apply_flatpak(packages);
@@ -3155,6 +3158,7 @@ impl App {
         let token = session.token.clone();
         let epoch = self.epoch;
         self.packages.busy = true;
+        self.packages.search_busy = true;
         self.packages.error = None;
         Task::future(async move {
             match kind {

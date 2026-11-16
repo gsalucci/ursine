@@ -30,6 +30,23 @@
 
 ### Changed
 
+- Alignment pass across the three package views (user decision):
+  list-row buttons (Install/Upgrade/Remove) are guarded against busy
+  states everywhere (apk/flatpak used raw presses), Direct install
+  arms only with a non-empty input, Search arms only with a query and
+  shows `Searching…` while in flight with Enter-to-search (apk/
+  flatpak gained nix's submit), Upgrade-all arms against busy on
+  apk/flatpak, Add forms share the same guards, every manager shows
+  the `No matches` note after an empty search, and the empty-list
+  note is one string everywhere (`Result / No packages installed.`),
+  and query placeholders share one style (`e.g. …`).
+- Repository rows share one shape in all three managers: identity as
+  the title (apk gets a daemon-built `label` — `@tag` when masked,
+  else `v3.24 main`; nix keeps the flake name) with the full URL in
+  the detail line (nix appends `· scope`).
+- apk repositories also read **`/etc/apk/repositories.d/`**
+  fragments for the list, and Remove rewrites the fragment that owns
+  the line.
 - Section naming is uniform across the managers (user decision):
   every manager now says **Repositories** (was "Remotes" /
   "Flake repositories"), **Add repository**, and repository

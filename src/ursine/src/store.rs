@@ -678,7 +678,10 @@ impl StoreState {
             .iter()
             .position(|name| *name == self.search_repo)
             .unwrap_or(0);
-        let can_search = !self.search_busy && !self.search_query.trim().is_empty();
+        let can_search = !self.busy
+            && !self.action_busy
+            && !self.search_busy
+            && !self.search_query.trim().is_empty();
         let search = SearchVm {
             repository: Some(
                 settings::item(
@@ -691,7 +694,7 @@ impl StoreState {
                 )
                 .into(),
             ),
-            query_placeholder: "Package name".to_string(),
+            query_placeholder: "e.g. hello".to_string(),
             query: self.search_query.clone(),
             on_query_input: Message::StoreSearchChanged,
             query_submit: Some(Message::StoreSearchSubmitted),
@@ -741,9 +744,11 @@ impl StoreState {
                     ),
                 )
                 .into();
-            let detail = format!("{} · {}", repository.name, repository.scope);
+            // Uniform row shape: name as the title, URL + scope as
+            // the detail (scope distinguishes duplicate names).
+            let detail = format!("{} · {}", repository.url, repository.scope);
             repo_items.push(crate::package_ui::repository_row(
-                repository.url.clone(),
+                repository.name.clone(),
                 Some(detail),
                 vec![action],
             ));
@@ -879,10 +884,7 @@ impl StoreState {
             if showing_results {
                 Some(("No matches".to_string(), "No packages matched.".to_string()))
             } else if !self.busy {
-                Some((
-                    "No packages".to_string(),
-                    "This profile has no installed packages.".to_string(),
-                ))
+                Some(("Result".to_string(), "No packages installed.".to_string()))
             } else {
                 None
             }

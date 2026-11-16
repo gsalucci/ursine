@@ -83,6 +83,9 @@ pub struct PackagesState {
     /// Unused-runtime count from the last flatpak list (None = not
     /// probed / unknown; Some(0) = nothing to remove).
     pub orphans: Option<u64>,
+    /// A flatpak/apk search is in flight (drives the Search label
+    /// exactly like `nix`'s `search_busy`).
+    pub search_busy: bool,
     /// Pattern-actions input (regex over installed names).
     pub pattern: String,
     /// (operation, pattern) waiting for confirmation.
@@ -129,6 +132,7 @@ impl Default for PackagesState {
             pattern: String::new(),
             pending_pattern: None,
             orphans: None,
+            search_busy: false,
             error: None,
             message: None,
             pending_remove: None,
@@ -161,6 +165,7 @@ impl PackagesState {
         self.flatpak_updates.clear();
         self.flatpak_remotes.clear();
         self.searching = false;
+        self.search_busy = false;
         self.updates_checked = false;
         self.updates_checking = false;
         self.updates_seq = self.updates_seq.wrapping_add(1);
@@ -448,7 +453,7 @@ impl PackagesState {
             all: Some(UpgradeAllVm {
                 label: "Upgrade all".to_string(),
                 message: Message::PackageUpdateRequested,
-                armed: !self.action_busy,
+                armed: !self.busy && !self.action_busy,
             }),
             manager: manager.to_string(),
             auto: match kind {
@@ -497,10 +502,15 @@ impl PackagesState {
             query_placeholder: kind.search_placeholder().to_string(),
             query: self.query.clone(),
             on_query_input: Message::PackageQueryChanged,
-            query_submit: None,
-            query_label: "Search".to_string(),
+            query_submit: Some(Message::PackageSearchRequested),
+            query_label: if self.search_busy {
+                "Searching…"
+            } else {
+                "Search"
+            }
+            .to_string(),
             search: Message::PackageSearchRequested,
-            search_armed: !self.busy && !self.action_busy,
+            search_armed: !self.busy && !self.action_busy && !self.query.trim().is_empty(),
             install_placeholder: match kind {
                 PackageKind::Apk => "niri",
                 PackageKind::Flatpak => "org.mozilla.firefox",
@@ -511,7 +521,7 @@ impl PackagesState {
             install_extras,
             install_trailing,
             install_message: Message::PackageInstallRequested,
-            install_armed: !self.action_busy,
+            install_armed: !self.busy && !self.action_busy && !self.install.trim().is_empty(),
         };
 
         // --- Repositories / Remotes ---
@@ -520,14 +530,17 @@ impl PackagesState {
             PackageKind::Apk => {
                 for repository in &self.apk_repositories {
                     let url = repository.url.clone();
-                    let label = repository.tag.as_ref().map_or_else(
-                        || repository.url.clone(),
-                        |tag| format!("@{tag} {}", repository.url),
-                    );
+                    // Uniform row shape: identity as the title, the
+                    // full URL as the detail line (daemon-built label).
+                    let label = if repository.label.is_empty() {
+                        repository.url.clone()
+                    } else {
+                        repository.label.clone()
+                    };
                     let mut actions: Vec<Element<'_, Message>> =
                         vec![button::destructive("Remove")
                             .on_press_maybe(
-                                (!self.action_busy)
+                                (!self.busy && !self.action_busy)
                                     .then_some(Message::PackageApkRepoRemoveRequested(url.clone())),
                             )
                             .into()];
@@ -541,7 +554,11 @@ impl PackagesState {
                                 .into(),
                         );
                     }
-                    repo_items.push(crate::package_ui::repository_row(label, None, actions));
+                    repo_items.push(crate::package_ui::repository_row(
+                        label,
+                        Some(repository.url.clone()),
+                        actions,
+                    ));
                 }
                 repo_items.push(
                     settings::item(
@@ -555,8 +572,10 @@ impl PackagesState {
                                 .into(),
                             button::text("Add")
                                 .on_press_maybe(
-                                    (!self.action_busy && !self.apk_repo_url.trim().is_empty())
-                                        .then_some(Message::PackageApkRepoAdd),
+                                    (!self.busy
+                                        && !self.action_busy
+                                        && !self.apk_repo_url.trim().is_empty())
+                                    .then_some(Message::PackageApkRepoAdd),
                                 )
                                 .into(),
                         ])
@@ -578,7 +597,7 @@ impl PackagesState {
                             Some(remote.url.clone()),
                             vec![button::destructive("Remove")
                                 .on_press_maybe(
-                                    (!self.action_busy)
+                                    (!self.busy && !self.action_busy)
                                         .then_some(Message::FlatpakRemoteRemoveRequested(name)),
                                 )
                                 .into()],
@@ -597,7 +616,8 @@ impl PackagesState {
                                 .into(),
                             button::text("Add")
                                 .on_press_maybe(
-                                    (!self.action_busy
+                                    (!self.busy
+                                        && !self.action_busy
                                         && !self.flatpak_remote_name.trim().is_empty()
                                         && !self.flatpak_remote_url.trim().is_empty())
                                     .then_some(Message::FlatpakRemoteAdd),
@@ -651,7 +671,10 @@ impl PackagesState {
                     notes: Vec::new(),
                     actions: if self.searching {
                         vec![button::text("Install")
-                            .on_press(Message::PackageInstallDirect(package.name.clone()))
+                            .on_press_maybe(
+                                (!self.busy && !self.action_busy)
+                                    .then_some(Message::PackageInstallDirect(package.name.clone())),
+                            )
                             .into()]
                     } else if package.protected {
                         vec![text("protected").into()]
@@ -660,16 +683,20 @@ impl PackagesState {
                         if self.apk_updates.iter().any(|u| u.name == package.name) {
                             buttons.push(
                                 button::text("Upgrade")
-                                    .on_press(Message::ApkUpgradeRequested(package.name.clone()))
+                                    .on_press_maybe((!self.busy && !self.action_busy).then_some(
+                                        Message::ApkUpgradeRequested(package.name.clone()),
+                                    ))
                                     .into(),
                             );
                         }
                         buttons.push(
                             button::text("Remove")
-                                .on_press(Message::PackageRemoveRequested(
-                                    kind,
-                                    package.name.clone(),
-                                    package.name.clone(),
+                                .on_press_maybe((!self.busy && !self.action_busy).then_some(
+                                    Message::PackageRemoveRequested(
+                                        kind,
+                                        package.name.clone(),
+                                        package.name.clone(),
+                                    ),
                                 ))
                                 .into(),
                         );
@@ -701,7 +728,11 @@ impl PackagesState {
                     }
                     let actions: Vec<Element<'_, Message>> = if self.searching {
                         vec![button::text("Install")
-                            .on_press(Message::PackageInstallDirect(package.app_id.clone()))
+                            .on_press_maybe(
+                                (!self.busy && !self.action_busy).then_some(
+                                    Message::PackageInstallDirect(package.app_id.clone()),
+                                ),
+                            )
                             .into()]
                     } else if package.kind == FlatpakRefKind::Runtime {
                         vec![text("protected").into()]
@@ -714,18 +745,20 @@ impl PackagesState {
                         {
                             buttons.push(
                                 button::text("Upgrade")
-                                    .on_press(Message::FlatpakUpgradeRequested(
-                                        package.app_id.clone(),
+                                    .on_press_maybe((!self.busy && !self.action_busy).then_some(
+                                        Message::FlatpakUpgradeRequested(package.app_id.clone()),
                                     ))
                                     .into(),
                             );
                         }
                         buttons.push(
                             button::text("Remove")
-                                .on_press(Message::PackageRemoveRequested(
-                                    kind,
-                                    package.app_id.clone(),
-                                    package.app_id.clone(),
+                                .on_press_maybe((!self.busy && !self.action_busy).then_some(
+                                    Message::PackageRemoveRequested(
+                                        kind,
+                                        package.app_id.clone(),
+                                        package.app_id.clone(),
+                                    ),
                                 ))
                                 .into(),
                         );
@@ -746,8 +779,14 @@ impl PackagesState {
                 .collect(),
         };
         let listed = rows.len();
-        let empty_note = if rows.is_empty() && !self.searching && !self.busy {
-            Some(("Result".to_string(), "No packages installed.".to_string()))
+        let empty_note = if rows.is_empty() {
+            if self.searching {
+                Some(("No matches".to_string(), "No packages matched.".to_string()))
+            } else if !self.busy {
+                Some(("Result".to_string(), "No packages installed.".to_string()))
+            } else {
+                None
+            }
         } else {
             None
         };

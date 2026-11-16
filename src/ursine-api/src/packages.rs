@@ -40,6 +40,11 @@ pub struct ApkRepository {
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
+    /// Row title built by the daemon: `@tag` when masked, otherwise the
+    /// repository's path identity (`v3.24 main`), falling back to the
+    /// URL. Empty on old daemons — the GUI then shows the URL.
+    #[serde(default)]
+    pub label: String,
 }
 
 /// One configured Flatpak remote.
