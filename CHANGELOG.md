@@ -1,35 +1,12 @@
 # Changelog
 
-## [0.35.0] — 2026-11-13
-
-### Changed
-
-- **One GUI code path for every package manager** (user decision,
-  full fusion): a single `view()` in `package_ui.rs` renders apk,
-  flatpak and nix — section order (`SECTIONS`: Scope → Maintenance →
-  Upgrade → Search → Repositories → Pattern → Installed →
-  Generations), row shapes (title / description /
-  repository / notes) and every confirm block are written once;
-  `StoreState`/`PackagesState` only build a `PackageVm` of data.
-  Sections a manager lacks are hidden by visibility flags, an
-  alignment test asserts that no manager can reorder the canonical
-  list, and nix's search results/status now follow the apk pattern
-  (results in the bottom list, status in the top busy line).
+## [0.36.0] — 2026-11-16
 
 ### Added
 
 - **Filter row in the installed list** of every package manager: type
   to narrow the rows (installed or search results) client-side; an
   empty result shows the shared `No matches` note.
-- flatpak **orphan count**: the Maintenance row shows
-  `Remove orphans… (N)` from a read-only probe
-  (`flatpak uninstall --unused` always answered `n` — the plan is
-  parsed, nothing is ever removed; `orphans` in the `list_flatpak`
-  response, best-effort) and disables itself at zero.
-- flatpak search gets a **Preview** button like apk's: fetches the
-  ref info (existing `get_flatpak_info`) and shows version/sizes/
-  runtime/remote as the copyable top message — the install confirm
-  stays a separate step.
 
 ### Changed
 
@@ -56,6 +33,36 @@
 - apk repositories also read **`/etc/apk/repositories.d/`**
   fragments for the list, and Remove rewrites the fragment that owns
   the line.
+
+## [0.35.0] — 2026-11-13
+
+### Changed
+
+- **One GUI code path for every package manager** (user decision,
+  full fusion): a single `view()` in `package_ui.rs` renders apk,
+  flatpak and nix — section order (`SECTIONS`: Scope → Maintenance →
+  Upgrade → Search → Repositories → Pattern → Installed →
+  Generations), row shapes (title / description /
+  repository / notes) and every confirm block are written once;
+  `StoreState`/`PackagesState` only build a `PackageVm` of data.
+  Sections a manager lacks are hidden by visibility flags, an
+  alignment test asserts that no manager can reorder the canonical
+  list, and nix's search results/status now follow the apk pattern
+  (results in the bottom list, status in the top busy line).
+
+### Added
+
+- flatpak **orphan count**: the Maintenance row shows
+  `Remove orphans… (N)` from a read-only probe
+  (`flatpak uninstall --unused` always answered `n` — the plan is
+  parsed, nothing is ever removed; `orphans` in the `list_flatpak`
+  response, best-effort) and disables itself at zero.
+- flatpak search gets a **Preview** button like apk's: fetches the
+  ref info (existing `get_flatpak_info`) and shows version/sizes/
+  runtime/remote as the copyable top message — the install confirm
+  stays a separate step.
+
+### Changed
 - Section naming is uniform across the managers (user decision):
   every manager now says **Repositories** (was "Remotes" /
   "Flake repositories"), **Add repository**, and repository
