@@ -6,6 +6,14 @@
 See `state/session-state.json` for current goals, decisions, risks, and next actions.
 See `AGENTS.md` for project context and milestone history.
 
+## Session 2026-11-16 (c) — half-page browsers, release 0.38.0 (main, tag `v0.38.0`)
+
+**Status**: Pushed through `f29d9d9`; feature CI `43932204543` + session-docs CI `43912341137` success; tag CI `43936042826`/`43936043200` success; auto-pin `e73433f` pulled, HEAD `e73433f`.
+
+- **Half-page browsers (`93e3112`)**: nix Generations + the Installed list of ALL THREE managers open in a centered modal (`Application::dialog` override, cosmic `widget::dialog`: scrollable control, 900×≤600px, Close) from compact page rows ("List / Open list…", "History / Browse generations…"). Flags: `PackagesState.list_browser`, `StoreState.{list_browser,generations_browser}` — reset on kind switch, target-user change, every tab switch. Acting from inside a browser closes it first (row install/remove/upgrade ×3, every store action, Rollback/Diff which live inside the generations dialog).
+- Review closed: blocker — Rollback/Diff didn't close the generations dialog; belt-and-braces reset in `open_package_tab`. VM-smoke note: scrollable `Fill` inside the dialog control must be clamped by `max_height(600)` for scrolling to engage (visual check pending).
+- Gate green each step; rustdoc `cargo doc -D warnings` lesson applied pre-push.
+
 ## Session 2026-11-16 (b) — unlimited lists + search, Generations order, release 0.37.0 (main, tag `v0.37.0`)
 
 **Status**: Pushed through `b5426f3`; tag CI `43906543519`/`43906543937` success, feature CI `43903607405` success (one rustdoc failure on `d796101` — intra-doc link to pub(crate) const — fixed in `167105f`, `cargo doc -D warnings` now run locally before push). Auto-pin `6d199d0` pulled, HEAD `6d199d0`.
