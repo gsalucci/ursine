@@ -63,6 +63,7 @@
   stays a separate step.
 
 ### Changed
+
 - Section naming is uniform across the managers (user decision):
   every manager now says **Repositories** (was "Remotes" /
   "Flake repositories"), **Add repository**, and repository
