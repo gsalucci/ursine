@@ -1085,7 +1085,7 @@ pub async fn run_root_program(
 }
 
 /// Like [`run_root_program`] but keeps the WHOLE stdout (bounded at
-/// [`MAX_COMPLETE_OUTPUT`]): installed lists must never truncate
+/// `MAX_COMPLETE_OUTPUT`): installed lists must never truncate
 /// (user decision: unlimited lists).
 pub async fn run_root_program_complete(
     program: &str,
