@@ -72,7 +72,7 @@ pub enum ApparmorQuery {
     EasyprofList(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ApparmorState {
     pub busy: bool,
     pub action_busy: bool,
@@ -93,29 +93,6 @@ pub struct ApparmorState {
     pub easyprof_groups: String,
     pub error: Option<String>,
     pub message: Option<String>,
-}
-
-impl Default for ApparmorState {
-    fn default() -> Self {
-        Self {
-            busy: false,
-            action_busy: false,
-            loaded: false,
-            view: None,
-            selected: None,
-            editor: text_editor::Content::new(),
-            editor_path: None,
-            editor_body: String::new(),
-            pending: None,
-            output: None,
-            decode_input: String::new(),
-            easyprof_binary: String::new(),
-            easyprof_template: String::new(),
-            easyprof_groups: String::new(),
-            error: None,
-            message: None,
-        }
-    }
 }
 
 impl ApparmorState {

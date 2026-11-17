@@ -7,7 +7,9 @@
 #   scripts/dev.sh test           cargo test (all features)
 #   scripts/dev.sh clippy         cargo clippy -D warnings
 #   scripts/dev.sh fmt            cargo fmt --check
-#   scripts/dev.sh check          fmt + clippy + test
+#   scripts/dev.sh check          fmt + clippy + test (full workspace)
+#   scripts/dev.sh fast           fmt + clippy/test scoped to the change
+#                                 + pure lints (no rust recompilation)
 #   scripts/dev.sh static [group] static analysis (default: all)
 #   scripts/dev.sh docs           markdownlint
 set -eu
@@ -57,7 +59,32 @@ fmt)
   run_ci cargo fmt --check
   ;;
 check)
-  run_ci sh -c 'cargo fmt --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo test --workspace --all-features --locked'
+  # ONE compilation: clippy-driver lints the workspace (with -D
+  # warnings) while it builds the tests — no separate clippy pass.
+  run_ci sh -c 'cargo fmt --check && RUSTC_WORKSPACE_WRAPPER=clippy-driver CLIPPY_ARGS="-Dwarnings" cargo test --workspace --all-features --locked'
+  ;;
+fast)
+  # Iteration gate (the one to use while editing): fmt always, then
+  # clippy+test SCOPED to what changed (a ursine-only edit must not
+  # rebuild the workspace twice), then the pure lints — no rust
+  # recompilation at all. CI still runs the full matrix; use `check`
+  # and `static all` before a release.
+  run_ci cargo fmt --check
+  changed=$( (git diff --name-only HEAD; git ls-files --others --exclude-standard) | sort -u )
+  if printf '%s\n' "$changed" | grep -qE '^(Cargo\.(toml|lock)|rust-toolchain|src/ursine-api/|src/ursine-core/|src/ursined/)'; then
+    scope="--workspace --all-targets --all-features"
+  elif printf '%s\n' "$changed" | grep -q '^src/ursine/'; then
+    scope="-p ursine --all-targets --all-features"
+  elif printf '%s\n' "$changed" | grep -q '^src/ursinectl/'; then
+    scope="-p ursinectl --all-targets --all-features"
+  else
+    scope=""
+  fi
+  if [ -n "$scope" ]; then
+    run_ci sh -c "RUSTC_WORKSPACE_WRAPPER=clippy-driver CLIPPY_ARGS=\"-Dwarnings\" cargo test $scope --locked"
+  fi
+  run_static sh scripts/static-check.sh repo
+  run_docs sh scripts/docs-check.sh
   ;;
 static)
   run_static sh scripts/static-check.sh "${1:-all}"
@@ -66,7 +93,7 @@ docs)
   run_docs sh scripts/docs-check.sh
   ;;
 *)
-  echo "usage: scripts/dev.sh {image|build|test|clippy|fmt|check|static [group]|docs}" >&2
+  echo "usage: scripts/dev.sh {image|build|test|clippy|fmt|check|fast|static [group]|docs}" >&2
   exit 2
   ;;
 esac

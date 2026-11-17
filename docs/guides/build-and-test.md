@@ -20,10 +20,27 @@ rustfmt, PAM headers and the GUI build dependencies.
 Canonical shortcut (same images and commands as CI):
 
 ```bash
-scripts/dev.sh check        # fmt + clippy + test
-scripts/dev.sh static all   # analyzers
+scripts/dev.sh fast         # WHILE EDITING: fmt + clippy/test scoped to
+                            # the changed crates + pure lints (typos, ec,
+                            # shellcheck, taplo, actionlint, zizmor,
+                            # gitleaks) + markdown — no rust recompilation
+scripts/dev.sh check        # fmt + single-pass test (clippy lints ride
+                            # the same compilation, full workspace)
+scripts/dev.sh static all   # analyzers (CI runs these too)
 scripts/dev.sh docs         # Markdown
 ```
+
+**Time policy** (tests are never dropped — they are staged):
+
+- **Per edit**: `fast`. A `src/ursine/**`-only change compiles and
+  tests just the `ursine` crate (not the workspace twice); an
+  `api`/`core`/`Cargo.*` change falls back to the full workspace.
+  The pure lints never compile anything, so they cost seconds.
+- **Before push**: CI is the authoritative full gate (test matrix,
+  clippy, rustdoc, analyzer groups) — run `check` locally if you
+  want assurance before pushing, but CI re-runs everything anyway.
+- **Before a release**: `static all` locally once (it duplicates the
+  CI analyzer on purpose as the last line of defense).
 
 Manual equivalents, if you need one command:
 
@@ -32,13 +49,13 @@ podman run --rm --network=host -v "$PWD:/work" -w /work \
   -e CARGO_HOME=/work/artifacts/cargo-home ursine-ci:1 \
   sh -c 'cargo fmt --check'
 
-podman run --rm --network=host -v "$PWD:/work" -w /work \
-  -e CARGO_HOME=/work/artifacts/cargo-home ursine-ci:1 \
-  sh -c 'cargo clippy --workspace --all-targets --all-features -- -D warnings'
-
+# Single pass: clippy-driver lints (workspace [lints] + -D warnings)
+# during the ONE compilation that also builds the tests.
 podman run --rm --network=host -v "$PWD:/work" -w /work \
   -e CARGO_HOME=/work/artifacts/cargo-home \
   -e RUST_MIN_STACK=16777216 \
+  -e RUSTC_WORKSPACE_WRAPPER=clippy-driver \
+  -e CLIPPY_ARGS="-Dwarnings" \
   ursine-ci:1 \
   sh -c 'cargo test --workspace --all-features --locked'
 ```
@@ -117,14 +134,17 @@ podman run --rm --network=host -v "$PWD:/work" -w /work nixos/nix \
 1. **image** builds the Alpine musl dev image once and pushes
    `ursine-ci:main` (or uses the GHA layer cache). Test/lint/gui/package pull
    that image.
-2. **test (default)** and **test (pam)** run `cargo test` for API/core/daemon
-   and integration tests. The GUI is excluded here because it has its own job.
-3. **lint** runs one `cargo clippy --workspace --all-targets --all-features`,
-   `cargo fmt --check`, and rustdoc with `-D warnings`. The GUI clippy pass is
-   no longer a second job.
-4. **gui** runs `cargo test -p ursine --all-targets --locked`. This compiles
-   and runs the GUI tests; there is no separate `cargo build`, and clippy is
-   not repeated.
+2. **test (default)** and **test (pam)** run a SINGLE pass:
+   `RUSTC_WORKSPACE_WRAPPER=clippy-driver CLIPPY_ARGS="-Dwarnings"
+   cargo test …` — clippy lints (workspace `[lints]`, `-D warnings`)
+   and the whole suite come out of one compilation. The GUI is excluded
+   here because it has its own job. Jobs are skipped on tags.
+3. **lint** runs `cargo fmt --check` and rustdoc with `-D warnings` only —
+   clippy rides the test jobs (single pass), so there is no second clippy
+   build anywhere in the pipeline. Skipped on tags.
+4. **gui** runs the same single pass for `-p ursine`
+   (`clippy-driver` wrapper + `cargo test -p ursine --all-targets --locked`);
+   no separate `cargo build`, no repeated clippy. Skipped on tags.
 5. **analyzer**, **docs**, and **zizmor** run in parallel. `analyzer` runs the
    repo/sast/deps/duplicates/sbom groups; `docs` runs markdownlint; `zizmor`
    audits workflow security.
@@ -154,8 +174,9 @@ release package path is never cached. This keeps zizmor's cache-poisoning
 audit clean while avoiding repeated dependency compilation on main.
 
 `cargo test` builds the test binaries before running them; a separate
-`cargo build` cannot replace that work. The optimization is to remove a
-second GUI build and to start the release build before the tests finish,
+`cargo build` cannot replace that work. Two optimizations stack: the
+single pass (`clippy-driver` wrapper) removes the second clippy
+compilation, and the release build starts before the tests finish,
 with `publish` still blocked on every quality gate.
 
 ## Static image contents

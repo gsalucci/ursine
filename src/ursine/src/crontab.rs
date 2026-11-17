@@ -10,7 +10,7 @@ use cosmic::Element;
 use crate::app::Message;
 use crate::package_ui::{text_row, ConfirmVm};
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct CrontabState {
     pub busy: bool,
     pub action_busy: bool,
@@ -26,22 +26,6 @@ pub struct CrontabState {
     pub confirm: bool,
     pub error: Option<String>,
     pub message: Option<String>,
-}
-
-impl Default for CrontabState {
-    fn default() -> Self {
-        Self {
-            busy: false,
-            action_busy: false,
-            loaded: false,
-            had_crontab: false,
-            editor: text_editor::Content::new(),
-            body: String::new(),
-            confirm: false,
-            error: None,
-            message: None,
-        }
-    }
 }
 
 impl CrontabState {
