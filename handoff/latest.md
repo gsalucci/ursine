@@ -6,6 +6,16 @@
 See `state/session-state.json` for current goals, decisions, risks, and next actions.
 See `AGENTS.md` for project context and milestone history.
 
+## Session 2026-11-17 — CI pipeline split + single-pass gate, release 0.39.1 (main, tag `v0.39.1`)
+
+**Status**: Pushed through `52777bd` + tag `v0.39.1`; push CI `44095649999`/`44100041869` success (no `package` job — verified); tag CI `44104078121` success (checks skipped, `package`+`publish` green — verified); auto-pin `6519964` pulled, HEAD `6519964`.
+
+- **nix repo rows (`463981c`)**: exactly the apk shape — identity (`flake:ursine`) title, full URL single detail, Remove right; `· scope` suffix gone from the row (confirm still says "system repository" for global).
+- **CI restructure (`d1443ad`, user decision)**: branch push NEVER builds artifacts (only a release tag may); a tag never re-runs checks (the push of the same commit already ran them). `test/lint/gui/analyzer/docs/zizmor` → `if: github.ref_type != 'tag'`; `package` tag-only (+ forced dispatch / PR smoke) with `!cancelled()`; `publish` tag-only with `!cancelled()`. Verified live both ways: push run has no package, tag run skips checks.
+- **Single-pass gate (`fe73cf5`, user decision "falli uguali, non perdere nessun test")**: `RUSTC_WORKSPACE_WRAPPER=clippy-driver CLIPPY_ARGS="-Dwarnings" cargo test` = one compilation does clippy lints + ALL tests, everywhere (CI test matrix + gui job, `dev.sh check/fast`). Separate clippy build deleted from CI lint job (fmt + rustdoc remain). **Bug found by probe**: clippy-driver takes `CLIPPY_ARGS` as ONE argv — `-D warnings` reaches rustc as unknown lint ` warnings` and denies nothing; must be `-Dwarnings`. Wrapper proved stricter than plain clippy (caught `derivable_impls` on ApparmorState/CrontabState → `#[derive(Default)]`). Full workspace single pass green (13 suites, rc=0).
+- **`dev.sh fast`**: iteration gate — fmt + clippy/test scoped to changed crates + pure lints, no rust recompilation; time policy in `build-and-test.md` §2. `run_ci` now exports `RUST_MIN_STACK=16777216` (inprocess SIGABRT caught by fast on workspace scope, `37c0df1`).
+- Release `52777bd` (0.39.1: nix rows CHANGELOG entry); gates green each commit (fmt, single-pass tests, docs, typos, static all).
+
 ## Session 2026-11-16 (d) — perf + modals everywhere, release 0.39.0 (main, tag `v0.39.0`)
 
 **Status**: Pushed through `126d630` (keyring hung again mid-session — user fixed auth, GIT_TRACE pinned `git-credential-libsecret get`); feature CI `44060327227` + tag CI `44063478538`/`44063478566` success; auto-pin `ae99888` pulled, HEAD `ae99888`.
