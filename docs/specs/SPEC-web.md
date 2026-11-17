@@ -8,7 +8,7 @@ violate it. Decision deferred to v3; see Open Questions.
 ## Objective
 
 Web frontend for Ursine (v3, AFTER the desktop GUI): same API, same UX model,
-served as static assets by `ursined` itself. Login via PAM today, OIDC later
+served as static assets by `ursined` itself. Login via shadow auth today, OIDC later
 (see SPEC-daemon-core / SPEC-protocol seam). Web is the LAST frontend.
 
 ## Binding constraint: memory-safe frontend

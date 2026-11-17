@@ -16,13 +16,14 @@ use crate::modules;
 use crate::ratelimit::RateLimiter;
 use crate::session::TokenStore;
 
-/// PAM input caps: bound work before any audit or authentication call.
+/// Auth input caps: bound work before any audit or authentication call.
 const MAX_AUTH_USER_BYTES: usize = 256;
 const MAX_AUTH_PASSWORD_BYTES: usize = 1024;
-/// A hung PAM/NSS backend must not pin a connection slot forever.
+/// A hung authenticator must not pin a connection slot forever.
 const AUTH_TIMEOUT: Duration = Duration::from_secs(30);
-/// Bounded PAM concurrency: a timed-out task keeps its permit until PAM
-/// returns, so hung backends cannot accumulate blocking-pool threads.
+/// Bounded authenticator concurrency: a timed-out task keeps its permit
+/// until the auth call returns, so hung backends cannot accumulate
+/// blocking-pool threads.
 pub const MAX_INFLIGHT_AUTH: usize = 8;
 /// A profile target user is a local account name, never a path or a blob.
 const MAX_AS_USER_BYTES: usize = 64;
@@ -191,7 +192,7 @@ impl Daemon {
             return Response::err(id, ApiError::rate_limited());
         }
 
-        // Bound the work before any audit or PAM call. On rejection, audit the
+        // Bound the work before any audit or auth call. On rejection, audit the
         // kernel peer identity so a huge claimed name cannot grow the log. The
         // rate limiter above caps these writes per uid.
         if user.len() > MAX_AUTH_USER_BYTES || password.len() > MAX_AUTH_PASSWORD_BYTES {
@@ -211,9 +212,10 @@ impl Daemon {
 
         let anonymous = Principal::local(user, Vec::new());
 
-        // PAM blocks; keep it off the async worker threads. Everything the
-        // closure needs is owned so the task is 'static. A timed-out blocking
-        // task keeps its permit until PAM returns, which bounds thread growth.
+        // The authenticator blocks (shadow I/O + crypt); keep it off the
+        // async worker threads. Everything the closure needs is owned so the
+        // task is 'static. A timed-out task keeps its permit until the auth
+        // call returns, which bounds thread growth.
         let Ok(permit) = self.auth_permits.clone().try_acquire_owned() else {
             tracing::warn!(uid = peer.uid, "authenticator busy");
             self.audit.record(
@@ -512,10 +514,29 @@ mod tests {
     #![allow(clippy::disallowed_methods)] // tests use the host temp dir
     use super::*;
     use crate::audit::AuditLog;
-    use crate::auth::stub::StubAuthenticator;
+    use crate::auth::{AuthError, Authenticator};
     use crate::clock::ManualClock;
     use std::time::Duration;
     use ursine_api::{ResponseBody, SessionToken, PROTOCOL_VERSION};
+
+    /// Test double mirroring the shadow contract: rejects empty
+    /// credentials, accepts the fixture user, grants wheel so the
+    /// authorization path is reachable. Never shipped.
+    struct TestAuth;
+
+    impl Authenticator for TestAuth {
+        fn authenticate(
+            &self,
+            _peer: &PeerInfo,
+            user: &str,
+            password: &str,
+        ) -> Result<Principal, AuthError> {
+            if user.is_empty() || password.is_empty() {
+                return Err(AuthError::Invalid);
+            }
+            Ok(Principal::local(user, vec!["wheel".into()]))
+        }
+    }
 
     fn daemon(dir: &std::path::Path) -> (Arc<ManualClock>, Daemon) {
         let clock = ManualClock::new(0);
@@ -534,7 +555,7 @@ mod tests {
         let d = Daemon {
             caps: Registry::system(),
             config_path: dir.join("config.toml"),
-            auth: Arc::new(StubAuthenticator),
+            auth: Arc::new(TestAuth),
             sessions: TokenStore::new(Duration::from_secs(600), clock.clone()),
             ratelimit: RateLimiter::new(cfg.login_rate_limit_per_min, clock.clone()),
             auth_permits: Arc::new(tokio::sync::Semaphore::new(MAX_INFLIGHT_AUTH)),
@@ -913,7 +934,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stub_rejects_empty_credentials_generically() {
+    async fn auth_rejects_empty_credentials_generically() {
         let (_clock, d) = daemon(&tmp_dir("empty-creds"));
         let req = Request {
             v: PROTOCOL_VERSION,

@@ -1,7 +1,7 @@
 #!/bin/sh
-# Ursine installer — binaries, PAM service and init unit.
+# Ursine installer — binaries and init unit.
 #
-# Works on any Linux distribution with Linux-PAM. Paths are configurable; the
+# Works on any Linux distribution. Paths are configurable; the
 # defaults follow the FHS and the service layouts used by systemd, OpenRC and
 # dinit. Packaging builds should pass --destdir and an explicit --init.
 #
@@ -25,7 +25,6 @@ SBINDIR=${SBINDIR:-}
 MANDIR=${MANDIR:-}
 LIBEXECDIR=${LIBEXECDIR:-}
 SYSCONFDIR=${SYSCONFDIR:-/etc}
-PAMDIR=${PAMDIR:-/etc/pam.d}
 LOCALSTATEDIR=${LOCALSTATEDIR:-/var}
 UNITDIR=${UNITDIR:-}
 DINIT_CONFIG_DIR=${DINIT_CONFIG_DIR:-}
@@ -33,11 +32,8 @@ BIN_SRC=${BIN_SRC:-}
 INIT=${INIT:-auto}
 FORCE=${FORCE:-0}
 START=${START:-1}
-ALLOW_STUB=${ALLOW_STUB:-0}
 ALLOW_UNVERIFIED_AUTH=${ALLOW_UNVERIFIED_AUTH:-0}
-INSTALL_PAM=${INSTALL_PAM:-1}
 INSTALL_SERVICE=${INSTALL_SERVICE:-1}
-PAM_CHECK=${PAM_CHECK:-1}
 CHECK=0
 
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
@@ -57,7 +53,7 @@ info() {
 
 usage() {
   cat <<'EOF'
-Ursine installer — installs ursine, ursined, the PAM service and an init unit.
+Ursine installer — installs ursine, ursined and an init unit.
 
 USAGE
   sudo ./install.sh [options]
@@ -68,7 +64,6 @@ OPTIONS
   --sbindir DIR         Daemon directory (default: PREFIX/sbin)
   --libexecdir DIR      Internal helpers (default: PREFIX/lib)
   --sysconfdir DIR      Configuration root (default: /etc)
-  --pamdir DIR          PAM service directory (default: /etc/pam.d)
   --localstatedir DIR   Variable data root (default: /var)
   --unitdir DIR         Init service directory (default depends on --init)
   --dinit-config-dir DIR
@@ -76,22 +71,19 @@ OPTIONS
   --destdir DIR         Stage everything under DIR; skip activation
   --bin-dir DIR         Directory containing the ursine/ursined binaries
   --init NAME           systemd, openrc, dinit or none (default: auto-detect)
-  --no-pam              Do not install the PAM service
   --no-service          Do not install an init unit
   --no-start            Install the unit but do not enable/start it
-  --skip-pam-check      Do not require pam_unix.so at install time
-  --allow-stub          Allow installing a stub-auth (non-PAM) daemon; dev only
   --allow-unverified-auth
                         Permit cross-architecture staging when the target
                         binary cannot run; auth backend stays unverified
-  --force               Overwrite changed PAM/unit files (backup first)
+  --force               Overwrite changed unit files (backup first)
   --check               Print the resolved plan and exit
   --help                Show this help
 
 ENVIRONMENT
-  DESTDIR, PREFIX, BINDIR, SBINDIR, LIBEXECDIR, SYSCONFDIR, PAMDIR,
+  DESTDIR, PREFIX, BINDIR, SBINDIR, LIBEXECDIR, SYSCONFDIR,
   MANDIR, LOCALSTATEDIR, UNITDIR, DINIT_CONFIG_DIR, BIN_SRC, INIT, START,
-  ALLOW_STUB, ALLOW_UNVERIFIED_AUTH.
+  ALLOW_UNVERIFIED_AUTH.
 
 EXAMPLES
   sudo ./install.sh
@@ -155,15 +147,6 @@ while [ "$#" -gt 0 ]; do
     SYSCONFDIR=${1#*=}
     shift
     ;;
-  --pamdir)
-    need_value "$@"
-    PAMDIR=$2
-    shift 2
-    ;;
-  --pamdir=*)
-    PAMDIR=${1#*=}
-    shift
-    ;;
   --localstatedir)
     need_value "$@"
     LOCALSTATEDIR=$2
@@ -220,24 +203,12 @@ while [ "$#" -gt 0 ]; do
     INIT=${1#*=}
     shift
     ;;
-  --no-pam)
-    INSTALL_PAM=0
-    shift
-    ;;
   --no-service)
     INSTALL_SERVICE=0
     shift
     ;;
   --no-start)
     START=0
-    shift
-    ;;
-  --skip-pam-check)
-    PAM_CHECK=0
-    shift
-    ;;
-  --allow-stub)
-    ALLOW_STUB=1
     shift
     ;;
   --allow-unverified-auth)
@@ -276,7 +247,6 @@ fi
 
 PREFIX=$(trim_trailing_slash "$PREFIX")
 SYSCONFDIR=$(trim_trailing_slash "$SYSCONFDIR")
-PAMDIR=$(trim_trailing_slash "$PAMDIR")
 LOCALSTATEDIR=$(trim_trailing_slash "$LOCALSTATEDIR")
 [ -n "$DESTDIR" ] && DESTDIR=$(trim_trailing_slash "$DESTDIR")
 [ -n "$BINDIR" ] || BINDIR="$PREFIX/bin"
@@ -305,7 +275,7 @@ validate_path() {
 }
 
 for path in "$PREFIX" "$BINDIR" "$SBINDIR" "$LIBEXECDIR" "$SYSCONFDIR" \
-  "$PAMDIR" "$LOCALSTATEDIR" "$DINIT_CONFIG_DIR" "$MANDIR"; do
+  "$LOCALSTATEDIR" "$DINIT_CONFIG_DIR" "$MANDIR"; do
   validate_path "$path"
 done
 [ -z "$UNITDIR" ] || validate_path "$UNITDIR"
@@ -330,7 +300,7 @@ target_path() {
 find_asset_dir() {
   for dir in "$SCRIPT_DIR/packaging" "$SCRIPT_DIR/share/ursine/packaging" \
     "$SCRIPT_DIR/../packaging"; do
-    if [ -d "$dir/pam.d" ]; then
+    if [ -d "$dir/systemd" ]; then
       printf '%s' "$dir"
       return 0
     fi
@@ -356,19 +326,13 @@ BIN_SRC=$(CDPATH='' cd -- "$BIN_SRC" && pwd -P) || die "cannot enter --bin-dir: 
 [ -f "$BIN_SRC/ursine" ] || die "missing $BIN_SRC/ursine"
 [ -f "$BIN_SRC/ursined" ] || die "missing $BIN_SRC/ursined"
 
-# Refuse to install a dev stub authenticator as a root service by accident.
+# The daemon must report the shadow authenticator (the only build).
 # Execute the target binary when possible, including DESTDIR staging. Cross-
 # architecture staging cannot execute the target and must opt in explicitly.
 if [ "$CHECK" -eq 0 ]; then
   if version=$("$BIN_SRC/ursined" --version 2>/dev/null); then
     case "$version" in
-    *"auth: pam"*) ;;
-    *"auth: stub"*)
-      if [ "$ALLOW_STUB" -ne 1 ]; then
-        die "refusing stub-auth daemon; use a --features pam build (or --allow-stub for dev)"
-      fi
-      warn "installing STUB-AUTH daemon: any non-empty password is accepted"
-      ;;
+    *"auth: shadow"*) ;;
     *) die "unexpected ursined --version output: $version" ;;
     esac
   elif [ -n "$DESTDIR" ] && [ "$ALLOW_UNVERIFIED_AUTH" -eq 1 ]; then
@@ -380,7 +344,7 @@ if [ "$CHECK" -eq 0 ]; then
   fi
 fi
 
-if [ "$INSTALL_PAM" -eq 1 ] || { [ "$INSTALL_SERVICE" -eq 1 ] && [ "$INIT" != none ]; }; then
+if [ "$INSTALL_SERVICE" -eq 1 ] && [ "$INIT" != none ]; then
   ASSET_DIR=$(find_asset_dir) || die "packaging assets not found (run from the release tree)"
 fi
 
@@ -486,34 +450,6 @@ if [ "$CHECK" -eq 0 ] && [ -z "$DESTDIR" ] && [ "$(id -u)" -ne 0 ]; then
   die "run as root, or use --destdir DIR to stage files"
 fi
 
-pam_module=
-if [ "$INSTALL_PAM" -eq 1 ]; then
-  [ -f "$ASSET_DIR/pam.d/ursine" ] || die "missing $ASSET_DIR/pam.d/ursine"
-  if [ -z "$DESTDIR" ] && [ "$PAM_CHECK" -eq 1 ]; then
-    for dir in /lib/security /lib64/security /usr/lib/security \
-      /usr/lib64/security /lib/x86_64-linux-gnu/security \
-      /usr/lib/x86_64-linux-gnu/security \
-      /lib/aarch64-linux-gnu/security \
-      /usr/lib/aarch64-linux-gnu/security; do
-      if [ -f "$dir/pam_unix.so" ]; then
-        pam_module="$dir/pam_unix.so"
-        break
-      fi
-    done
-    if [ -z "$pam_module" ]; then
-      case "$OS_ID $OS_LIKE" in
-      *alpine*) hint="apk add linux-pam" ;;
-      *debian* | *ubuntu*) hint="apt-get install libpam-modules" ;;
-      *fedora* | *rhel* | *centos*) hint="dnf install pam" ;;
-      *arch*) hint="pacman -S pam" ;;
-      *suse*) hint="zypper install pam" ;;
-      *) hint="install Linux-PAM (pam_unix.so)" ;;
-      esac
-      die "pam_unix.so not found; run: $hint (or use --skip-pam-check)"
-    fi
-  fi
-fi
-
 if [ "$INSTALL_SERVICE" -eq 1 ]; then
   case "$INIT" in
   systemd) [ -f "$ASSET_DIR/systemd/ursined.service" ] || die "missing systemd unit asset" ;;
@@ -533,15 +469,6 @@ show_plan() {
   info "prefix: $PREFIX"
   info "binaries: $BIN_SRC -> $BINDIR, $SBINDIR"
   info "config: $SYSCONFDIR/ursine/config.toml"
-  if [ "$INSTALL_PAM" -eq 1 ]; then
-    if [ -n "$DESTDIR" ]; then
-      info "PAM service: $PAMDIR/ursine (target check skipped for staging)"
-    elif [ -n "$pam_module" ]; then
-      info "PAM service: $PAMDIR/ursine (module: $pam_module)"
-    else
-      info "PAM service: $PAMDIR/ursine (module check skipped)"
-    fi
-  fi
   if [ "$INSTALL_SERVICE" -eq 1 ]; then
     case "$INIT" in
     systemd) info "unit: $UNITDIR/ursined.service" ;;
@@ -587,7 +514,6 @@ render_to() {
     -e "s|@SBINDIR@|$(sed_escape "$SBINDIR")|g" \
     -e "s|@LIBEXECDIR@|$(sed_escape "$LIBEXECDIR")|g" \
     -e "s|@SYSCONFDIR@|$(sed_escape "$SYSCONFDIR")|g" \
-    -e "s|@PAMDIR@|$(sed_escape "$PAMDIR")|g" \
     -e "s|@LOCALSTATEDIR@|$(sed_escape "$LOCALSTATEDIR")|g" \
     -e "s|@DINIT_CONFIG_DIR@|$(sed_escape "$DINIT_CONFIG_DIR")|g" \
     "$render_src" >"$render_dst" || return 1
@@ -666,29 +592,6 @@ ensure_dir "$(target_path "$BINDIR")" 0755
 ensure_dir "$(target_path "$SBINDIR")" 0755
 ensure_dir "$(target_path "$SYSCONFDIR/ursine")" 0750
 ensure_dir "$(target_path "$LOG_DIR")" 0750
-
-if [ "$INSTALL_PAM" -eq 1 ]; then
-  if [ -z "$DESTDIR" ]; then
-    [ -d "$PAMDIR" ] || die "PAM directory not found: $PAMDIR"
-  fi
-  ensure_dir "$(target_path "$PAMDIR")" 0755
-  PAM_TARGET=$(target_path "$PAMDIR/ursine")
-  if [ -L "$PAM_TARGET" ]; then
-    die "refusing to replace symlink: $PAM_TARGET"
-  fi
-  if [ -d "$PAM_TARGET" ]; then
-    die "refusing to replace directory: $PAM_TARGET"
-  fi
-  if [ -n "$DESTDIR" ] && [ "$(id -u)" -ne 0 ]; then
-    warn "staging PAM as non-root: ownership will be the builder; use root or fakeroot"
-  fi
-  if [ -e "$PAM_TARGET" ] && ! cmp -s "$ASSET_DIR/pam.d/ursine" "$PAM_TARGET"; then
-    [ "$FORCE" -eq 1 ] || die "refusing to overwrite $PAM_TARGET (use --force)"
-    backup_file "$PAM_TARGET"
-  fi
-  install_file "$ASSET_DIR/pam.d/ursine" "$PAM_TARGET" 0644
-  info "installed: $PAM_TARGET"
-fi
 
 if [ "$INSTALL_SERVICE" -eq 1 ]; then
   case "$INIT" in

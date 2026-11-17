@@ -2,8 +2,8 @@
 
 ## Install a release
 
-See [installation.md](installation.md) for the cross-distro installer, PAM
-service and systemd/OpenRC/dinit units. This guide covers building from source.
+See [installation.md](installation.md) for the cross-distro installer and
+systemd/OpenRC/dinit units. This guide covers building from source.
 
 ## Prerequisites
 
@@ -47,10 +47,9 @@ scripts/clean-artifacts.sh --all  # + cargo clean (artifacts/target)
 
 Run it after builds or whenever disk is tight.
 
-Note: `libpam0g-dev` is NOT needed on the dev machine — PAM sits behind the
-`pam` cargo feature. Dev builds compile a stub auth path. The FeralOS package
-builds with `--features pam` (linux-pam is present on every FeralOS install via
-sudo-rs).
+Note: no auth headers are needed on the dev machine — auth reads
+`/etc/shadow` in-process (Webmin pattern, pure Rust `pwhash`). One build,
+no cargo features, same binary shape as the release.
 
 ## Session start (MANDATORY every session)
 
@@ -82,7 +81,7 @@ All code under `src/`, all tests under `tests/`, build output + generated files 
 
 ```text
 src/ursine-api       shared protocol/config types (serde)
-src/ursine-core      module implementations (apk, flatpak, nix, pam, btrfs, caps)
+src/ursine-core      module implementations (apk, flatpak, nix, shadow auth, btrfs, caps)
 src/ursined          root daemon (dinit service)
 src/ursine           libcosmic GUI (COSMIC toolkit, iced-based)
 src/tools            shipped shell tools (activation/deactivation)

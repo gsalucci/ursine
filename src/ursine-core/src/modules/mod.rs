@@ -97,7 +97,7 @@ pub async fn handle(
         (ModuleId::System, Action::Status) => Ok(json!({
             "version": env!("CARGO_PKG_VERSION"),
             "protocol_version": ursine_api::PROTOCOL_VERSION,
-            "auth": if cfg!(feature = "pam") { "pam" } else { "stub" },
+            "auth": "shadow",
         })),
         // Poll a job log; the registry validates the id, the principal
         // binding and bounds the read.
@@ -390,7 +390,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn system_status_reports_stub_auth_in_dev() {
+    async fn system_status_reports_shadow_auth() {
         let (caps, cfg, _path) = ctx_with(AllMissing);
         let env = test_env("ctx");
         let ctx = ModuleCtx {
@@ -403,10 +403,7 @@ mod tests {
         let v = handle(ModuleId::System, &Action::Status, &ctx)
             .await
             .unwrap();
-        assert_eq!(
-            v["auth"],
-            if cfg!(feature = "pam") { "pam" } else { "stub" }
-        );
+        assert_eq!(v["auth"], "shadow");
         assert_eq!(v["protocol_version"], ursine_api::PROTOCOL_VERSION);
     }
 

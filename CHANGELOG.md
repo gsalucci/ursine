@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **Authentication is now the Webmin pattern** (user decision): the
+  daemon verifies user+password directly against `/etc/shadow` in-process
+  (`pwhash`, pure Rust) — no PAM, no C libraries, no cargo features.
+  Locked/expired/unsupported accounts fail closed with timing
+  equalization. `ursined` and `ursinectl` link **fully static**
+  (CI `readelf`-verified); the GUI stays dynamic musl (`libxkbcommon`).
+  `/etc/pam.d/ursine`, the `pam` feature, the dev stub and the
+  `--no-pam`/`--skip-pam-check`/`--allow-stub` installer flags are gone.
+- **One test job**: `scripts/test-gate.sh` (single pass: clippy lints +
+  the whole workspace suite in one compilation) is run by both
+  `scripts/dev.sh check` and the CI `test` job — the feature matrix and
+  the separate GUI job are gone with the feature flags. `dev.sh fast`
+  (scoped iteration gate) removed: every run tests everything.
+
 ## [0.39.1] — 2026-11-17
 
 ### Changed

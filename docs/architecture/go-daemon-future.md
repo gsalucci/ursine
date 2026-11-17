@@ -2,6 +2,10 @@
 
 **Status:** proposed, not implemented. Current release (0.7.0) is Rust.
 **Scope:** daemon; GUI decision remains separate.
+**Update (shadow-auth switch):** Ursine now verifies `/etc/shadow` directly
+(pure Rust, no PAM), so the PAM helper split below is no longer required — a
+Go daemon would read the shadow file itself. Kept for the migration design
+that is still relevant.
 
 ## Goal
 

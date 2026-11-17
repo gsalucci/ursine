@@ -1,10 +1,10 @@
 # Ursine CI — fully containerized (rule 9): no host toolchains on runners.
 #
-# Jobs: image · test matrix (default/pam) · lint (clippy+fmt+doc) · gui (tests) ·
-#       analyzer (repo/sast/deps/duplicates/sbom) · docs · zizmor ·
-#       version + changes (release/path gates) ·
-#       package (release binaries, starts in parallel with tests) ·
-#       publish (waits for test/lint/gui/analyzer/docs) ·
+# Jobs: image · test (single-pass clippy+tests, same script as local) ·
+#       lint (fmt+rustdoc) · analyzer (repo/sast/deps/duplicates/sbom) ·
+#       docs · zizmor · version + changes (release/path gates) ·
+#       package (static release binaries, tag only) ·
+#       publish (waits for test/lint/analyzer/docs) ·
 #       flake (PR/main only, when Nix inputs changed) ·
 #       verify-pin (post-tag Nix build on main).
 #
@@ -16,8 +16,9 @@
 # Why binaries are built in Alpine, not Nix: nixpkgs does not cache musl
 # toolchains (stable included) — a source build takes hours. Alpine IS musl and
 # builds in ~1 min. The flake packages the pinned release artifact
-# (nix/binary.nix, reproducible URL+sha256). PAM modules are dlopen'ed at
-# runtime, so binaries must be DYNAMIC musl (static musl has no dlopen).
+# (nix/binary.nix, reproducible URL+sha256). Since the shadow-auth switch the
+# daemon and CLI build FULLY STATIC (no C dependencies); the GUI stays dynamic
+# (Alpine ships no libxkbcommon.a — every desktop provides it).
 #
 # Layout/spec reference: docs/specs/SPEC-packaging-infra.md
 
@@ -49,7 +50,7 @@ env:
   NIX_CONFIG: "experimental-features = nix-command flakes"
 
 jobs:
-  # ── Dev/CI image: built once, used by build/test/lint/gui/package ──
+  # ── Dev/CI image: built once, used by build/test/lint/package ──
   image:
     runs-on: ubuntu-latest
     permissions:
@@ -77,7 +78,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ── Test matrix: one cargo test run per feature combination, musl ──
+  # ── Test gate: ONE job, same script as `scripts/dev.sh check` ──
   test:
     runs-on: ubuntu-latest
     needs: image
@@ -88,11 +89,6 @@ jobs:
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-    strategy:
-      fail-fast: false
-      matrix:
-        features: ["", "pam"]
-    name: test (${{ matrix.features || 'default' }})
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -104,14 +100,14 @@ jobs:
             artifacts/cargo-home/registry/cache
             artifacts/cargo-home/git/db
             artifacts/target
-          key: cargo-test-${{ matrix.features || 'default' }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'ci/Containerfile.dev') }}
+          key: cargo-test-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'ci/Containerfile.dev') }}
           restore-keys: |
-            cargo-test-${{ matrix.features || 'default' }}-
+            cargo-test-
       - name: Test (single pass — clippy lints + all tests)
         # scripts/test-gate.sh is the single source of truth shared with
-        # `scripts/dev.sh check`: same legs, same flags, single-pass
-        # clippy-driver wrapper, same RUST_MIN_STACK.
-        run: sh scripts/test-gate.sh ${{ matrix.features || 'default' }}
+        # `scripts/dev.sh check`: same command, single-pass clippy-driver
+        # wrapper, same RUST_MIN_STACK.
+        run: sh scripts/test-gate.sh
       - name: Save Cargo cache
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
@@ -122,9 +118,9 @@ jobs:
             artifacts/cargo-home/registry/cache
             artifacts/cargo-home/git/db
             artifacts/target
-          key: cargo-test-${{ matrix.features || 'default' }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'ci/Containerfile.dev') }}
+          key: cargo-test-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'ci/Containerfile.dev') }}
 
-  # ── Format + rustdoc gate (clippy rides the test jobs: one pass) ──
+  # ── Format + rustdoc gate (clippy rides the test job: one pass) ──
   lint:
     runs-on: ubuntu-latest
     needs: image
@@ -162,45 +158,6 @@ jobs:
             artifacts/cargo-home/git/db
             artifacts/target
           key: cargo-lint-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'ci/Containerfile.dev') }}
-
-  # ── GUI: libcosmic tests on musl (clippy runs in `lint`) ──
-  gui:
-    runs-on: ubuntu-latest
-    needs: image
-    if: github.ref_type != 'tag'
-    container:
-      image: ghcr.io/${{ github.repository_owner }}/ursine-ci:main
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            artifacts/cargo-home/registry/index
-            artifacts/cargo-home/registry/cache
-            artifacts/cargo-home/git/db
-            artifacts/target
-          key: cargo-gui-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'ci/Containerfile.dev') }}
-          restore-keys: |
-            cargo-gui-
-      - name: GUI test (single pass — clippy lints + tests)
-        # Same script as local: scripts/test-gate.sh gui.
-        run: sh scripts/test-gate.sh gui
-      - name: Save Cargo cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        continue-on-error: true
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            artifacts/cargo-home/registry/index
-            artifacts/cargo-home/registry/cache
-            artifacts/cargo-home/git/db
-            artifacts/target
-          key: cargo-gui-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'ci/Containerfile.dev') }}
 
   # ── Static analysis: same image and script as local (docs/STATIC-ANALYSIS.md) ──
   analyzer:
@@ -380,7 +337,7 @@ jobs:
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-    needs: [image, test, lint, gui, version, changes]
+    needs: [image, test, lint, version, changes]
     # Artifacts are built only for a release tag (or a manual force /
     # PR smoke): branch pushes never build release binaries.
     # !cancelled() lets the job run on tags where the check jobs above
@@ -394,18 +351,51 @@ jobs:
       # release artifacts. Builds are reproducible from Cargo.lock instead.
       # gh invokes git; container ownership differs from the checkout dir owner.
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - name: Build release binaries
+      - name: Build release binaries (static daemon+CLI, dynamic GUI)
         run: |
-          cargo build --release -p ursined --features pam
-          cargo build --release -p ursine -p ursinectl
+          # ONE build per linkage class: the daemon and CLI are pure Rust
+          # since the shadow-auth switch → fully static. The GUI needs
+          # libxkbcommon (no .a in Alpine) → dynamic musl, like every
+          # desktop app. Host units (proc-macros) must NOT get +crt-static,
+          # hence the explicit --target with target-scoped rustflags.
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-C target-feature=+crt-static" \
+            cargo build --release --target x86_64-unknown-linux-musl \
+            -p ursined -p ursinectl --locked
+          cargo build --release -p ursine --locked
           mkdir -p artifacts/pkg/bin
-          cp artifacts/target/release/ursined artifacts/target/release/ursine \
-            artifacts/target/release/ursinectl artifacts/pkg/bin/
+          cp artifacts/target/x86_64-unknown-linux-musl/release/ursined \
+            artifacts/target/x86_64-unknown-linux-musl/release/ursinectl \
+            artifacts/pkg/bin/
+          cp artifacts/target/release/ursine artifacts/pkg/bin/
           cp install.sh artifacts/pkg/
           cp src/tools/ursine-activate.sh artifacts/pkg/bin/ursine-activate
           cp src/tools/ursine-deactivate.sh artifacts/pkg/bin/ursine-deactivate
           chmod 755 artifacts/pkg/bin/ursine-activate artifacts/pkg/bin/ursine-deactivate
           cp -r packaging artifacts/pkg/
+          # Static contract: daemon + CLI must have ZERO dynamic deps.
+          # The GUI may only need the known desktop runtime libs.
+          fail=0
+          for b in ursined ursinectl; do
+            f="artifacts/target/x86_64-unknown-linux-musl/release/$b"
+            if readelf -d "$f" | grep -q NEEDED; then
+              echo "::error::$b is not static:"
+              readelf -d "$f" | grep NEEDED
+              fail=1
+            else
+              echo "$b: static OK"
+            fi
+          done
+          f="artifacts/target/release/ursine"
+          echo "ursine (GUI) dynamic deps:"
+          readelf -d "$f" | grep NEEDED
+          if readelf -d "$f" | grep NEEDED |
+            grep -Ev 'libxkbcommon\.so\.0|libgcc_s\.so\.1|libc\.musl-x86_64\.so\.1'; then
+            echo "::error::ursine (GUI) links an unexpected library"
+            fail=1
+          fi
+          if [ "$fail" -ne 0 ]; then
+            exit 1
+          fi
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             NAME="ursine-${GITHUB_REF_NAME}-x86_64-musl.tar.gz"
           else
@@ -447,11 +437,9 @@ jobs:
               test -f "$root/etc/dinit.d/config/ursined.conf"
               ;;
             esac
-            test -f "$root/etc/pam.d/ursine"
-            test "$(stat -c '%a' "$root/etc/pam.d/ursine")" = "644"
             test -x "$root/usr/bin/ursine"
             test -x "$root/usr/sbin/ursined"
-            test "$("$root/usr/sbin/ursined" --version | grep -c 'auth: pam')" = "1"
+            test "$("$root/usr/sbin/ursined" --version | grep -c 'auth: shadow')" = "1"
           done
           root="$PWD/artifacts/smoke/install-dinit-default"
           artifacts/smoke/install.sh --destdir "$root" --prefix /usr --init dinit --no-start
@@ -468,9 +456,6 @@ jobs:
           for init in systemd openrc dinit; do
             root="$PWD/artifacts/smoke/activate-$init"
             artifacts/smoke/bin/ursine-activate --profile "$profile" --root "$root" --init "$init" --no-start
-            test -f "$root/etc/pam.d/ursine"
-            test ! -L "$root/etc/pam.d/ursine"
-            test "$(stat -c '%a' "$root/etc/pam.d/ursine")" = "644"
             test -f "$root/usr/local/sbin/ursined"
             test ! -L "$root/usr/local/sbin/ursined"
             test "$(stat -c '%a' "$root/usr/local/sbin/ursined")" = "755"
@@ -520,7 +505,6 @@ jobs:
           for init in systemd openrc dinit; do
             root="$PWD/artifacts/smoke/activate-$init"
             artifacts/smoke/bin/ursine-deactivate --profile "$profile" --root "$root" --init "$init"
-            test ! -e "$root/etc/pam.d/ursine"
             test ! -e "$root/usr/local/sbin/ursined"
             case "$init" in
             systemd) test ! -e "$root/etc/systemd/system/ursined.service" ;;
@@ -552,7 +536,7 @@ jobs:
   # ── Publish: quality gates + write token isolated from build code ──────────
   publish:
     runs-on: ubuntu-latest
-    needs: [package, test, lint, gui, analyzer, docs, zizmor]
+    needs: [package, test, lint, analyzer, docs, zizmor]
     # Only a tag publishes (the checks already ran on its push).
     if: ${{ !cancelled() && github.ref_type == 'tag' }}
     permissions:

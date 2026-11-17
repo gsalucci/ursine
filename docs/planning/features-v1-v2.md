@@ -19,9 +19,9 @@ Rules applied to every feature:
 ### Foundation
 
 - Unix socket daemon, JSON-lines protocol, request IDs.
-- PAM handshake; dev stub behind feature flag.
+- Shadow handshake (`/etc/shadow` + pwhash); no feature flag, one build.
 - RAM-only session token, expiry, sliding TTL.
-- Failed-login rate limiting and bounded PAM concurrency.
+- Failed-login rate limiting and bounded authenticator concurrency.
 - Audit JSONL: principal, module, action, target user, outcome; no passwords.
 - Capability detection live, never persisted.
 - Per-module tri-state config: `auto`, on, off.
@@ -113,14 +113,14 @@ Still required for v1:
 
 ### Packaging and release
 
-- `/etc/pam.d/ursine`.
+- none (auth reads `/etc/shadow` directly).
 - systemd, OpenRC, dinit units.
 - install.sh with `DESTDIR`, path overrides, auth gate.
 - activation/deactivation tools.
 - release tarball and checksum.
 - Nix package and pinned release artifact.
 - CI: tests, lint, analyzer, docs, GUI, package, tag publish, Nix pin.
-- FeralOS real PAM smoke before v1.0.
+- FeralOS real login smoke (shadow auth) before v1.0.
 
 ## v2 — full system coverage
 
@@ -378,5 +378,5 @@ Not required by the intent table but compatible:
 - Every destructive action confirmed.
 - No password/secret in audit, logs, argv or environment.
 - Tests and analyzer gates green.
-- FeralOS PAM and package operations smoke-tested as root.
+- FeralOS login (shadow auth) and package operations smoke-tested as root.
 - v1.0 backend + GUI complete; packaging lives in the external `feralos-aports` repository.

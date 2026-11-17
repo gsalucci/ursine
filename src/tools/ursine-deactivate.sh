@@ -1,7 +1,7 @@
 #!/bin/sh
 # Deactivate Ursine system integration installed by ursine-activate.
 #
-# This removes the PAM service and the selected init unit, disables/stops the
+# This removes the selected init unit, disables/stops the
 # service, and leaves /etc/ursine and /var/log/ursine in place unless --purge is
 # passed.
 set -eu
@@ -29,7 +29,6 @@ if [ -z "$PROFILE" ]; then
 fi
 ROOT=
 INIT=
-FORCE=0
 PURGE=0
 DRY_RUN=0
 
@@ -37,13 +36,12 @@ usage() {
   cat <<'EOF'
 Usage: ursine-deactivate [options]
 
-Remove the Ursine PAM service and init unit.
+Remove the Ursine init unit.
 
 Options:
   --profile PATH   Nix profile used by the activation (default: inferred)
   --init NAME      force systemd, openrc, or dinit (default: auto-detect)
   --root PATH      stage removals under PATH instead of /
-  --force          remove a non-symlink /etc/pam.d/ursine
   --purge          also remove /etc/ursine and /var/log/ursine
   --dry-run        print actions without removing
   -h, --help       show this help
@@ -76,10 +74,6 @@ while [ "$#" -gt 0 ]; do
     [ -n "$2" ] || die "--root needs a non-empty path"
     ROOT=$2
     shift 2
-    ;;
-  --force)
-    FORCE=1
-    shift
     ;;
   --purge)
     PURGE=1
@@ -200,7 +194,8 @@ ETC="${ROOT}/etc"
 VAR="${ROOT}/var"
 LIBEXEC="${ROOT}/usr/lib"
 RUN_BIN="${ROOT}/usr/local/sbin/ursined"
-PAM_LINK="$ETC/pam.d/ursine"
+# Legacy artifact of pre-shadow releases (removed on deactivation).
+PAM_LEGACY="$ETC/pam.d/ursine"
 SYSTEMD_UNIT="$ETC/systemd/system/ursined.service"
 OPENRC_INIT="$ETC/init.d/ursined"
 DINIT_UNIT_LIB="${ROOT}/lib/dinit.d/ursined"
@@ -277,20 +272,16 @@ else
   esac
 fi
 
-remove_file "$RUN_BIN"
-
-if [ -L "$PAM_LINK" ]; then
-  remove_file "$PAM_LINK"
-elif [ -e "$PAM_LINK" ]; then
-  if [ "$FORCE" -eq 1 ] ||
-    grep -q 'Ursine authentication service' "$PAM_LINK" 2>/dev/null; then
-    remove_file "$PAM_LINK"
-  else
-    log "leaving non-Ursine $PAM_LINK (use --force to remove)"
-  fi
-else
-  log "PAM service already absent"
+# Legacy /etc/pam.d/ursine from pre-shadow releases: remove only a
+# symlink or a file carrying the Ursine marker (never a foreign one).
+if [ -L "$PAM_LEGACY" ]; then
+  remove_file "$PAM_LEGACY"
+elif [ -e "$PAM_LEGACY" ] &&
+  grep -q 'Ursine authentication service' "$PAM_LEGACY" 2>/dev/null; then
+  remove_file "$PAM_LEGACY"
 fi
+
+remove_file "$RUN_BIN"
 
 if [ "$PURGE" -eq 1 ]; then
   if [ "$DRY_RUN" -eq 1 ]; then

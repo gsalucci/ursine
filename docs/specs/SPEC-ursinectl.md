@@ -32,7 +32,7 @@ makes the chroot case trivial: every path (`/etc/ursine`, `/var/log/ursine`,
 The system stays the database; the CLI holds no state.
 
 The daemon remains required for the GUI and (v3) web: non-root frontends need
-the PAM/token privilege boundary. The CLI does not replace it and must never
+the auth/token privilege boundary. The CLI does not replace it and must never
 call it over the socket (root has no reason to hop through a token).
 
 ## Root gate
@@ -80,7 +80,7 @@ ursinectl [--json] [--yes] [--as-user U] [--config PATH] \
   confirmation); without it, refuse with the action name and exit 2.
   Dry-run/preview variants never require `--yes`.
 - Exit codes: 0 ok, 1 action/API error, 2 usage/root-gate/confirmation.
-- Auth: the euid-0 gate replaces PAM entirely; the CLI's in-process
+- Auth: the euid-0 gate replaces the shadow handshake entirely; the CLI's in-process
   authenticator rejects every `auth` request outright (no stub backdoor in
   a root binary).
 
@@ -104,7 +104,7 @@ ursinectl [--json] [--yes] [--as-user U] [--config PATH] \
 
 ## Security
 
-- euid-0 gate is the entire auth model; no PAM in the CLI.
+- euid-0 gate is the entire auth model; no credential check in the CLI.
 - Same dispatch validation as the wire (as_user scoping, config read/write
   guards, capability gating, audit on every action with principal root).
 - Audit log shared with the daemon (`/var/log/ursine/audit.jsonl`,

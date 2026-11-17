@@ -1,12 +1,10 @@
 //! Authentication: the ONE seam where identity is verified.
 //!
-//! Desktop/local flow today is a PAM check of user+password; in v3 an OIDC
+//! Desktop/local flow verifies user+password directly against
+//! `/etc/shadow` (Webmin pattern, feature-free); in v3 an OIDC
 //! implementation joins behind the same trait without touching the API.
 
-pub mod stub;
-
-#[cfg(feature = "pam")]
-pub mod pam;
+pub mod shadow;
 
 use ursine_api::Principal;
 
@@ -25,7 +23,7 @@ pub enum AuthError {
     /// Wrong credentials or unknown user — indistinguishable on purpose.
     #[error("invalid credentials")]
     Invalid,
-    /// Authenticator itself failed (PAM unavailable, ...).
+    /// Authenticator itself failed (shadow unreadable, ...).
     #[error("authenticator unavailable: {0}")]
     Internal(String),
 }

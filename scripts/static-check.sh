@@ -27,7 +27,7 @@ rust_group() {
   fi
   run cargo fmt --check
   # Lints ride the test gate (single pass) — same script as dev/CI.
-  run sh scripts/test-gate.sh all
+  run sh scripts/test-gate.sh
   step "cargo doc"
   if ! RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps; then STATUS=1; fi
 }

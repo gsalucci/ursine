@@ -30,7 +30,7 @@ Single backend, thin frontends:
 
 - `ursined` — root daemon, dinit service. Owns ALL logic: modules for packages (apk/flatpak/nix), users (passwd/shadow + user CLI), snapshots (btrfs/btrbk), niri config, capabilities detection. Stateless: the system itself is the database.
 - `ursine` — native GUI (**libcosmic**, COSMIC toolkit based on iced — Rust UI), thin API client. Security decision 2026-10-19 over visual coherence with the GTK Wayle shell.
-- `ursine-web` — web frontend served by the daemon itself; talks the same API. PAM login today, OIDC later. Stack TBD in v3; **must be memory-safe** (`docs/specs/SPEC-web.md`).
+- `ursine-web` — web frontend served by the daemon itself; talks the same API. Shadow login today, OIDC later. Stack TBD in v3; **must be memory-safe** (`docs/specs/SPEC-web.md`).
 - `ursine-api` / `ursine-core` — shared crates: API types + module implementations.
 
 Key choices (full rationale in `docs/architecture/overview.md`):
@@ -52,7 +52,7 @@ Key choices (full rationale in `docs/architecture/overview.md`):
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| PAM dev headers missing on dev machine | Certain (verified) | Low | PAM behind cargo feature; dev builds use stub auth |
+| — (removed with the shadow-auth switch: no C auth dependency) | — | — | formerly: PAM behind cargo feature, stub on dev |
 | APKINDEX gaps force workarounds (e.g. hplip missing) | Medium | Low | Track feralos-aports; document gaps |
 | nix/flatpak per-user execution from root daemon (su/setuid correctness) | Medium | High | `asUser` param, integration tests, review hardening |
 | Token/auth mistakes (this is root-access software) | Low | Critical | Small auth surface, audit log every action, short token TTL |

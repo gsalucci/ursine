@@ -31,16 +31,16 @@ The per-module setting `"auto" | true | false` in `/etc/ursine/config.toml`. `au
 _Avoid_: enabled/disabled boolean
 
 **Principal**:
-The authenticated identity of a requester: local PAM user or future OIDC subject. Every audit entry records it.
+The authenticated identity of a requester: local shadow user or future OIDC subject. Every audit entry records it.
 _Avoid_: user (ambiguous with system users), session
 
 **Session token**:
-RAM-only Bearer token issued by the daemon after successful auth (PAM handshake or, later, OIDC). Never on disk.
+RAM-only Bearer token issued by the daemon after successful auth (shadow handshake or, later, OIDC). Never on disk.
 _Avoid_: API key, cookie
 
-**PAM handshake**:
-The one-time credential check at session start, done by the daemon (service `ursine`), not by frontends.
-_Avoid_: login (reserved for the web form flow)
+**Shadow handshake**:
+The one-time credential check at session start, done by the daemon against `/etc/shadow` (Webmin pattern), not by frontends.
+_Avoid_: PAM handshake, login (reserved for the web form flow)
 
 **asUser**:
 Optional request field selecting the target unix user for per-user operations (`flatpak --user`, `nix profile`). Defaults to the principal. `apk` and `--system` operations ignore it.

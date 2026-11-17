@@ -64,12 +64,12 @@ No host toolchain. Run everything in the dev image (see getting-started):
 podman build -t ursine-ci:1 -f ci/Containerfile.dev .   # once
 podman run --rm --network=host -v "$PWD:/work" -w /work \
   -e CARGO_HOME=/work/artifacts/cargo-home ursine-ci:1 cargo build --workspace
-# Test gate (single pass: clippy lints + tests) — the SAME script CI runs:
-scripts/dev.sh check        # fmt + scripts/test-gate.sh all (default+pam+gui)
-scripts/dev.sh fast         # scoped gate while editing
+# Test gate (single pass: clippy lints + all tests) — the SAME script CI runs:
+scripts/dev.sh check        # fmt + scripts/test-gate.sh
 ```
 
-`pam` = cargo feature (no libpam headers on dev machine). Dev: `cargo build` (stub auth). Release/FeralOS: `cargo build --features pam`.
+Auth = shadow handshake (`/etc/shadow` + pwhash, Webmin pattern): one build,
+no cargo features, daemon+CLI link fully static.
 
 ## Host isolation (ABSOLUTE RULE)
 

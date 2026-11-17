@@ -6,10 +6,10 @@
 #     github:skea999/ursine#ursine
 #   sudo /nix/var/nix/profiles/ursine/bin/ursine-activate
 #
-# The script is idempotent. Re-run it after every upgrade so changed PAM or
-# init-unit assets are applied. The daemon and PAM policy are copied to
-# root-owned paths: the Nix profile is user-writable and must never be able to
-# replace the root service after activation.
+# The script is idempotent. Re-run it after every upgrade so changed
+# init-unit assets are applied. The daemon is copied to a root-owned path:
+# the Nix profile is user-writable and must never be able to replace the
+# root service after activation.
 set -eu
 
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/run/current-system/sw/bin
@@ -36,16 +36,14 @@ fi
 ROOT=
 INIT=
 START=1
-FORCE=0
 DRY_RUN=0
 CHANGED=0
-ALLOW_STUB=0
 
 usage() {
   cat <<'EOF'
 Usage: ursine-activate [options]
 
-Install or refresh the Ursine PAM service and init unit from a Nix profile.
+Install or refresh the Ursine init unit from a Nix profile.
 
 Options:
   --profile PATH   Nix profile containing bin/ursined and packaging/
@@ -53,8 +51,6 @@ Options:
   --init NAME      force systemd, openrc, or dinit (default: auto-detect)
   --root PATH      stage files under PATH instead of /; implies --no-start
   --no-start       install files but do not enable/restart the service
-  --force          replace an existing different /etc/pam.d/ursine
-  --allow-stub     allow a stub-auth daemon (development only)
   --dry-run        print actions without writing
   -h, --help       show this help
 EOF
@@ -91,14 +87,6 @@ while [ "$#" -gt 0 ]; do
     START=0
     shift
     ;;
-  --force)
-    FORCE=1
-    shift
-    ;;
-  --allow-stub)
-    ALLOW_STUB=1
-    shift
-    ;;
   --dry-run)
     DRY_RUN=1
     shift
@@ -123,17 +111,11 @@ case "$PROFILE" in
 '*) die "profile path must not contain a newline" ;;
 esac
 [ -x "$PROFILE/bin/ursined" ] || die "missing executable: $PROFILE/bin/ursined"
-[ -f "$PROFILE/packaging/pam.d/ursine" ] || die "missing PAM asset: $PROFILE/packaging/pam.d/ursine"
 if [ "$DRY_RUN" -eq 0 ]; then
   version=$("$PROFILE/bin/ursined" --version 2>/dev/null) ||
     die "cannot execute $PROFILE/bin/ursined --version"
   case "$version" in
-  *"auth: pam"*) ;;
-  *"auth: stub"*)
-    [ "$ALLOW_STUB" -eq 1 ] ||
-      die "refusing stub-auth daemon; install a PAM build (or --allow-stub for dev)"
-    log "warning: installing stub-auth daemon; any non-empty password is accepted"
-    ;;
+  *"auth: shadow"*) ;;
   *) die "unexpected ursined --version output: $version" ;;
   esac
 fi
@@ -238,8 +220,8 @@ LIBEXEC="${ROOT}/usr/lib"
 BIN_DIR="${ROOT}/usr/local/sbin"
 MAN1_DIR="${ROOT}/usr/local/share/man/man1"
 RUN_BIN="$BIN_DIR/ursined"
-PAM_LINK="$ETC/pam.d/ursine"
-PAM_SOURCE="$PROFILE/packaging/pam.d/ursine"
+# Legacy artifact of pre-shadow releases (removed on activation).
+PAM_LEGACY="$ETC/pam.d/ursine"
 SYSTEMD_UNIT="$ETC/systemd/system/ursined.service"
 OPENRC_INIT="$ETC/init.d/ursined"
 DINIT_UNIT_DIR=${URSINE_DINIT_UNIT_DIR:-}
@@ -375,26 +357,28 @@ remove_dinit_leftovers() {
   remove_boot_link "${ROOT}/etc/dinit.d/boot.d/ursined"
 }
 
-install_pam() {
-  ensure_dir "$(dirname "$PAM_LINK")"
-  if [ "$DRY_RUN" -eq 1 ]; then
-    log "would install $PAM_LINK"
-    return
-  fi
-  if [ -L "$PAM_LINK" ]; then
-    # Migrate the old user-profile symlink to a root-owned copy.
-    rm -f "$PAM_LINK"
-    CHANGED=1
-  elif [ -e "$PAM_LINK" ] && ! cmp -s "$PAM_SOURCE" "$PAM_LINK"; then
-    if grep -q 'Ursine authentication service' "$PAM_LINK" 2>/dev/null; then
-      backup="$PAM_LINK.ursine-backup.$(date +%Y%m%d%H%M%S)"
-      cp -p "$PAM_LINK" "$backup" || die "cannot back up $PAM_LINK"
-      log "backup: $backup"
-    elif [ "$FORCE" -ne 1 ]; then
-      die "$PAM_LINK exists and differs; use --force to replace it"
+# Drop the legacy /etc/pam.d/ursine a pre-shadow release may have
+# installed (root-owned copy or profile symlink). Never touch a file
+# that does not carry the Ursine marker.
+remove_legacy_pam() {
+  if [ -L "$PAM_LEGACY" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      log "would remove legacy $PAM_LEGACY"
+      return
     fi
+    rm -f "$PAM_LEGACY"
+    CHANGED=1
+    log "removed legacy $PAM_LEGACY"
+  elif [ -e "$PAM_LEGACY" ] &&
+    grep -q 'Ursine authentication service' "$PAM_LEGACY" 2>/dev/null; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      log "would remove legacy $PAM_LEGACY"
+      return
+    fi
+    rm -f "$PAM_LEGACY"
+    CHANGED=1
+    log "removed legacy $PAM_LEGACY"
   fi
-  install_file "$PAM_SOURCE" "$PAM_LINK" 0644
 }
 
 ensure_dir "$ETC"
@@ -404,7 +388,7 @@ if [ "$DRY_RUN" -eq 0 ]; then
   chmod 0750 "$ETC/ursine" "$VAR/log/ursine"
 fi
 
-install_pam
+remove_legacy_pam
 install_file "$PROFILE/bin/ursined" "$RUN_BIN" 0755
 # Root CLI ships with the profile since 0.25.x; install it next to the
 # other user-facing binaries so `sudo ursinectl` is on the secure path.

@@ -9,7 +9,6 @@ FROM alpine:3.24
 RUN apk add --no-cache \
     bash ca-certificates curl git nodejs tar \
     build-base openssl-dev pkgconf \
-    linux-pam-dev \
     cmake fontconfig-dev freetype-dev libxkbcommon-dev expat-dev \
     rustup \
     && rm -rf /var/cache/apk/*

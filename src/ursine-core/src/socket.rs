@@ -97,7 +97,7 @@ where
     }
 
     let listener = UnixListener::bind(path)?;
-    // Any local user may CONNECT; the PAM handshake is the gate (policy).
+    // Any local user may CONNECT; the shadow handshake is the gate (policy).
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o666))?;
     tracing::info!(socket = %path.display(), "listening");
 

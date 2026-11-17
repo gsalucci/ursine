@@ -47,8 +47,7 @@ fn main() -> std::process::ExitCode {
                 config_path = PathBuf::from(p);
             }
             "--version" => {
-                let auth = if cfg!(feature = "pam") { "pam" } else { "stub" };
-                println!("ursined {} (auth: {auth})", env!("CARGO_PKG_VERSION"));
+                println!("ursined {} (auth: shadow)", env!("CARGO_PKG_VERSION"));
                 return std::process::ExitCode::SUCCESS;
             }
             "--help" | "-h" => {
@@ -149,16 +148,9 @@ async fn async_main(config_path: PathBuf) -> std::process::ExitCode {
     }
 }
 
-#[cfg(feature = "pam")]
 fn build_authenticator() -> Arc<dyn Authenticator> {
-    tracing::info!("authentication: PAM (service \"ursine\")");
-    Arc::new(ursine_core::auth::pam::PamAuthenticator)
-}
-
-#[cfg(not(feature = "pam"))]
-fn build_authenticator() -> Arc<dyn Authenticator> {
-    tracing::warn!("authentication: STUB — DEVELOPMENT BUILD, never ship this binary");
-    Arc::new(ursine_core::auth::stub::StubAuthenticator)
+    tracing::info!("authentication: shadow (/etc/shadow, Webmin pattern)");
+    Arc::new(ursine_core::auth::shadow::ShadowAuthenticator::default())
 }
 
 /// SIGTERM or Ctrl-C ends the accept loop cleanly.

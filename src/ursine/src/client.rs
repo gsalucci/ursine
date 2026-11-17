@@ -1289,12 +1289,12 @@ mod tests {
         let status: SystemStatus = serde_json::from_value(serde_json::json!({
             "version": "0.3.1",
             "protocol_version": 1,
-            "auth": "pam",
+            "auth": "shadow",
         }))
         .unwrap();
         assert_eq!(status.version, "0.3.1");
         assert_eq!(status.protocol_version, 1);
-        assert_eq!(status.auth, "pam");
+        assert_eq!(status.auth, "shadow");
     }
 
     #[test]

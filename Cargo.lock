@@ -3589,26 +3589,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e6eb142958d64335fb0e345c5b9ead2ecd6fc438c307e9d7d3c4fd428dbaf12"
 
 [[package]]
-name = "pam-client"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8063ab6b13134bfee0183e251438fabc4bc3e1bff95b8582879cfb7cda6be580"
-dependencies = [
- "libc",
- "pam-sys",
- "rustversion",
-]
-
-[[package]]
-name = "pam-sys"
-version = "0.5.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd4858311a097f01a0006ef7d0cd50bca81ec430c949d7bf95cbefd202282434"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5315,7 +5295,6 @@ dependencies = [
  "cosmic-theme",
  "getrandom 0.2.17",
  "kdl",
- "pam-client",
  "pwhash",
  "regex",
  "serde",

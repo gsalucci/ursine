@@ -3,7 +3,7 @@
 Read `docs/architecture/overview.md` before any code change. Never violate these:
 
 1. **Memory-safe Rust only.** No `unsafe` blocks unless discussed and approved explicitly.
-2. **No polkit.** Auth = PAM handshake (feature `pam`) once per session + RAM-only session tokens. Never write tokens to disk, never store secrets in frontends.
+2. **No polkit.** Auth = shadow handshake (Webmin pattern: verify user+password directly against `/etc/shadow` in-process, no PAM, no C deps) once per session + RAM-only session tokens. Never write tokens to disk, never store secrets in frontends.
 3. **No D-Bus. Ever.** Ursine never speaks D-Bus (our code never links `zbus` or `dbus-send`, never runs `gsettings` over the session bus; libcosmic may pull `zbus` transitively — that dependency is theirs, documented in `docs/static-analysis-exceptions.md`). Operate on system files directly — the Webmin pattern (`/etc/passwd`, `/etc/shadow`, `/etc/group` … read/parse/write yourself) — or through system CLIs (`nmcli`, `bluetoothctl`, `firewall-cmd`, `useradd` …). A system CLI may use D-Bus internally; that is its component, never ours. Fewest components possible: Ursine is the GUI over the commands you would type.
 4. **No database. Ever.** The daemon is stateless; system state is read live from apk/flatpak/nix/shadow/btrfs. Audit = JSONL append-only. Config = `/etc/ursine/config.toml` (tri-state `"auto"|true|false`).
 5. **Capabilities are runtime-detected**, never persisted. `ensure_available()` before every module action. A capability names the exact CLI its module runs, and its fix hint is the exact install command for that binary (e.g. Disks → `apk add parted …`); the Home screen shows that fix on every activated feature whose capability is missing.

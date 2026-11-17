@@ -2,9 +2,8 @@
 #
 # WHY a prebuilt tarball: nixpkgs does not cache pkgsMusl/pkgsStatic tools
 # (stable included) — a source build would compile the musl toolchain for
-# hours on every CI run. musl dynamic binaries must link libpam at runtime
-# (PAM modules are dlopen'ed; static musl has no dlopen), so the artifact is
-# built in the Alpine CI container (same libc, fast) and pinned here.
+# hours on every CI run. The artifact is built in the Alpine CI container
+# (same libc, fast) and pinned here: static daemon+CLI, dynamic GUI.
 #
 # RELEASE CHECKLIST: CI updates version/url/sha256 on every `v*` tag; keep this
 # as the manual fallback.

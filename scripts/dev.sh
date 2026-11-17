@@ -4,11 +4,9 @@
 #
 #   scripts/dev.sh image          build ursine-ci
 #   scripts/dev.sh build          cargo build (all features)
-#   scripts/dev.sh test           full test gate (same legs as CI)
+#   scripts/dev.sh test           full test gate (same command as CI)
 #   scripts/dev.sh fmt            cargo fmt --check
 #   scripts/dev.sh check          fmt + full test gate (identical to CI)
-#   scripts/dev.sh fast           fmt + test gate scoped to the change
-#                                 + pure lints (seconds, no analyzers)
 #   scripts/dev.sh static [group] static analysis (default: all)
 #   scripts/dev.sh docs           markdownlint
 set -eu
@@ -51,42 +49,16 @@ build)
   run_ci cargo build --workspace --all-features --locked
   ;;
 test)
-  # Full gate without fmt: same legs as CI (stub + pam + gui).
-  run_ci sh scripts/test-gate.sh all
+  # Same command as CI, without fmt.
+  run_ci sh scripts/test-gate.sh
   ;;
 fmt)
   run_ci cargo fmt --check
   ;;
 check)
-  # Identical to the CI test/gui jobs: scripts/test-gate.sh is the one
-  # source of truth (stub + pam + gui legs, single pass each).
-  run_ci sh -c 'cargo fmt --check && sh scripts/test-gate.sh all'
-  ;;
-fast)
-  # Iteration gate (the one to use while editing): fmt always, then
-  # the test gate SCOPED to what changed (a GUI-only edit must not
-  # rebuild the daemon), then the pure lints. CI runs the full matrix;
-  # use `check` and `static all` before a release.
-  run_ci cargo fmt --check
-  changed=$( (
-    git diff --name-only HEAD
-    git ls-files --others --exclude-standard
-  ) | sort -u)
-  if printf '%s\n' "$changed" | grep -qE '^(Cargo\.(toml|lock)|rust-toolchain)'; then
-    scope="all"
-  elif printf '%s\n' "$changed" | grep -qE '^(src/ursine-api/|src/ursine-core/|src/ursined/|src/ursinectl/)'; then
-    scope="default pam"
-  elif printf '%s\n' "$changed" | grep -q '^src/ursine/'; then
-    scope="gui"
-  else
-    scope=""
-  fi
-  if [ -n "$scope" ]; then
-    # shellcheck disable=SC2086 # scope is a deliberate word list of gate legs
-    run_ci sh scripts/test-gate.sh $scope
-  fi
-  run_static sh scripts/static-check.sh repo
-  run_docs sh scripts/docs-check.sh
+  # Identical to the CI test job: scripts/test-gate.sh is the one
+  # source of truth (single pass: clippy lints + all tests).
+  run_ci sh -c 'cargo fmt --check && sh scripts/test-gate.sh'
   ;;
 static)
   run_static sh scripts/static-check.sh "${1:-all}"
@@ -95,7 +67,7 @@ docs)
   run_docs sh scripts/docs-check.sh
   ;;
 *)
-  echo "usage: scripts/dev.sh {image|build|test|fmt|check|fast|static [group]|docs}" >&2
+  echo "usage: scripts/dev.sh {image|build|test|fmt|check|static [group]|docs}" >&2
   exit 2
   ;;
 esac

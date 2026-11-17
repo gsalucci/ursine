@@ -2,20 +2,19 @@
 
 ## Objective
 
-Root daemon `ursined`: the single process owning all logic. Accepts frontend connections on a unix socket, authenticates principals via a one-time PAM handshake (wheel-gated), issues RAM-only session tokens, rate-limits logins, dispatches authenticated requests to modules, and writes a JSONL audit line for every action. Stateless: survives restart with zero reconciliation.
+Root daemon `ursined`: the single process owning all logic. Accepts frontend connections on a unix socket, authenticates principals via a one-time shadow handshake (wheel-gated), issues RAM-only session tokens, rate-limits logins, dispatches authenticated requests to modules, and writes a JSONL audit line for every action. Stateless: survives restart with zero reconciliation.
 
 ## Tech Stack
 
 - Rust stable, edition 2021, no unsafe
 - `tokio` (net, signal), `nix` crate (unix socket peer creds, umask), `serde_json`
-- PAM behind cargo feature `pam` via a maintained Rust PAM crate (links system linux-pam); dev builds use a stub authenticator that accepts any user/password and logs a loud warning — stub never ships
+- Shadow auth (Webmin pattern): read `/etc/shadow` in-process, verify with `pwhash` (pure Rust, the same crate that writes `$6$` hashes); fail-closed on locked/expired/unsupported accounts. No cargo features, no C dependencies — daemon and CLI link fully static
 - `tracing` + `tracing-subscriber` for logs (stderr), JSON lines for audit (separate file)
 
 ## Commands
 
 ```text
-cargo build  -p ursined                # dev (stub auth)
-cargo build  -p ursined --features pam # FeralOS build (needs linux-pam)
+cargo build  -p ursined                # static (no C deps)
 cargo test   -p ursined
 cargo clippy -p ursined -- -D warnings
 cargo run -p ursined -- --config /etc/ursine/config.toml
@@ -33,8 +32,7 @@ src/ursine-core/src/
    ├─ config.rs         load/validate/write /etc/ursine/config.toml (TriState)
    ├─ auth/
    │  ├─ mod.rs         Authenticator trait (issue, verify) — the ONLY seam
-   │  ├─ pam.rs         feature "pam": PAM service "ursine", pam_unix
-   │  └─ stub.rs        dev-only: accepts everything, WARN log per attempt
+   │  └─ shadow.rs      /etc/shadow verify (pwhash, Webmin pattern) + tests
    ├─ session.rs        token store in RAM: HashMap, TTL 10 min idle (config), sliding expiry
    ├─ ratelimit.rs      failed-login rate limit in RAM (default 5/min per uid, config)
    ├─ socket.rs         /run/ursine.sock root:root 0666, peer creds (SO_PEERCRED)
@@ -61,7 +59,7 @@ pub trait Authenticator: Send + Sync {
 
 1. Connect to `/run/ursine.sock` (root:root, 0666 — any local user may connect, like a Webmin login page)
 2. Client sends `Auth { user, password }`
-3. Daemon: rate-limit check → PAM verify (service `/etc/pam.d/ursine`) → wheel group check → issue 256-bit random token, RAM only
+3. Daemon: rate-limit check → shadow verify (`/etc/shadow`, fail-closed + timing-equalized) → wheel group check → issue 256-bit random token, RAM only
 4. Every subsequent `Call` carries `Authorization: Bearer <token>`; daemon validates + slides TTL (default 10 min idle, `token_ttl_min` in config)
 5. Auth failure → generic error (no user-exists oracle), audit line, rate-limit tick
 
@@ -117,8 +115,8 @@ keeps its previous versions through ONE uniform rotation mechanism
 ## Testing Strategy
 
 - Unit: session TTL expiry (fake clock), rate limiter, config validation, asUser resolution rules
-- Integration (unix, dev): socket loop with stub auth — auth OK, auth fail, expired token, unknown module
-- PAM path: NOT tested in dev (feature off); CI matrix runs `pam` feature compile + unit tests without real PAM calls
+- Integration (unix, dev): socket loop with a test authenticator — auth OK, auth fail, expired token, unknown module
+- Shadow path: unit-tested against fixture shadow files (valid/wrong/locked/expired/unsupported format); one test job runs the whole workspace suite via `scripts/test-gate.sh`
 
 ## Boundaries
 
@@ -128,10 +126,10 @@ keeps its previous versions through ONE uniform rotation mechanism
 
 ## Success Criteria
 
-- Dev build runs on this machine, accepts connections, auth via stub, dispatch returns `NotImplemented` for all modules
+- Dev build runs on this machine, accepts connections, auth via shadow, dispatch returns `NotImplemented` for all modules
 - Audit JSONL written and parseable; restart loses tokens only (clients must re-auth — by design)
-- CI green: default + `pam` feature matrix, musl target
+- CI green: single test gate (clippy lints + full suite, one pass), musl target
 
 ## Open Questions
 
-- None blocking (PAM crate choice finalized at implementation time from maintained options).
+- None blocking.

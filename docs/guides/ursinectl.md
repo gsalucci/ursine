@@ -487,5 +487,5 @@ sudo ursinectl logs log_search file=ursine/ursined.log query="listen" limit=20
 ## See also
 
 - `man ursinectl` (shipped with the package)
-- `docs/guides/installation.md` — installer, PAM, service units
+- `docs/guides/installation.md` — installer, service units
 - `docs/specs/SPEC-ursinectl.md` — design and test contract

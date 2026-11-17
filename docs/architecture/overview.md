@@ -31,7 +31,7 @@ No D-Bus either (decision 2026-11-09). Ursine never opens a bus connection, neve
 
 ```text
 Desktop GUI: connect unix socket → prompt password ONCE per session
-             → daemon verifies via PAM (service /etc/pam.d/ursine, pam_unix)
+             → daemon verifies against /etc/shadow (Webmin pattern, in-process)
              + group check (wheel)
              → session token issued (RAM only, TTL) → Bearer token per request
 
@@ -42,7 +42,7 @@ Rules:
 
 - The check is enforced by the DAEMON, never the GUI (any process can open a socket).
 - No token ever on disk (leaks via backups/dotfiles). Tokens live in daemon RAM, die on restart.
-- No dedicated "app user" with root: the daemon is root, principals are real (socket peer uid / PAM user / OIDC sub) so the audit log records who did what.
+- No dedicated "app user" with root: the daemon is root, principals are real (socket peer uid / shadow user / OIDC sub) so the audit log records who did what.
 - Rate-limit login attempts in the daemon.
 - Per-action user context: requests carry optional `asUser` (defaults to authenticated principal). `apk` and flatpak `--system` ignore it (root); `flatpak --user` and `nix profile` run as that user (`su`/setuid from the root daemon) because Nix is multi-user (profiles per-user under `/nix/var/nix/profiles/per-user/$USER`) and flatpak `--user` is per-user.
 - Accepted residual risk: after the handshake, a token-holding session has root power. Mitigations: short TTL, audit log every action, destructive actions require explicit confirmation in the frontend (UX, not security).
@@ -84,12 +84,12 @@ Capabilities API returns state + reason + fix, e.g.:
 
 ## Platform facts (verified 2026-10-16, Alpine v3.22 main+community APKINDEX + feralos repo)
 
-- `sudo-rs` is in FeralOS standardPackages and depends on `so:libpam.so.0` → **linux-pam is present on EVERY FeralOS install, servers included**. PAM is safe to depend on.
+- Auth reads `/etc/shadow` directly (Webmin pattern) — no PAM dependency, no C libraries; `pwhash` (already used to write `$6$` hashes) verifies them.
 - polkit is installed ONLY by desktop DEs (niri/niriWayle/cosmic pull polkit-elogind); server/hypervisor (`desktopEnvironment: "none"`) has none. Hence the no-polkit design.
 - PackageKit does not exist on Alpine. gnome-software-plugin-apk and -flatpak exist (apk+flatpak store possible off-the-shelf); Nix has no GUI anywhere — that gap is Ursine's flagship feature.
 - NOT packaged on Alpine: snapper, timeshift, hplip (HP USB printers — network HP works via sane-airscan/eSCL). btrbk IS packaged.
 - Scanning: sane-backends + sane-airscan + simple-scan — covered, no code needed.
-- FeralOS already ships: niri + Wayle (bar/notifications/OSD/wallpaper), Veila lock (PAM), Raffi launcher, oo7 secrets, greetd+regreet+accountsservice, elogind/turnstile, firewalld, flatpak, nix (multi-user daemon), podman+webmin (container), dinit (develop branch).
+- FeralOS already ships: niri + Wayle (bar/notifications/OSD/wallpaper), Veila lock (PAM — its own, not ours), Raffi launcher, oo7 secrets, greetd+regreet+accountsservice, elogind/turnstile, firewalld, flatpak, nix (multi-user daemon), podman+webmin (container), dinit (develop branch).
 - AppImage does not work on musl (glibc runtime) — irrelevant: we package apk.
 - Rust compiles natively on musl. libcosmic build deps exist on Alpine (`cmake`, `fontconfig-dev`, `freetype-dev`, `libxkbcommon-dev`, `expat-dev`, `pkgconf`); FeralOS already builds COSMIC components for musl (feralos-aports).
 - GUI toolkit decision (2026-10-19): **libcosmic** for the app — security over visual coherence with the GTK Wayle shell (no GTK/gdk-pixbuf/librsvg in the GUI process). Web GUI must also be memory-safe (stack TBD in v3).
@@ -105,11 +105,11 @@ docker run --rm -it -v "$PWD:/work" -w /work rust:alpine cargo build --workspace
 docker run --rm -it -v "$PWD:/work" -w /work rust:alpine sh     # interactive shell
 ```
 
-`rust:alpine` is musl-based; `linux-pam-dev` can be added inside the container for `--features pam` builds.
+`rust:alpine` is musl-based; auth needs no C headers (shadow + pwhash are pure Rust).
 
 GitHub CI (`.github/workflows/ci.yml`, to be created at v0.1) — **all jobs in Docker containers, no toolchain on the host**:
 
-1. **test matrix, musl**: `alpine:3.22` container (FeralOS target; `apk add rust cargo git nodejs`; `linux-pam-dev` only on pam jobs); `cargo test` runs once per cargo feature combination that exists — default, `pam` (`full` when web/oidc land in v3). Clippy (strict workspace lints) + fmt + rustdoc gate on all features; static analysis (repo/SAST/deps/SBOM) runs in the `ursine-static` image via `scripts/static-check.sh` (policy: `docs/STATIC-ANALYSIS.md`). (`nodejs` in-container so JS actions work on musl.)
+1. **test gate, musl**: `alpine:3.22` container (FeralOS target; `apk add rust cargo git nodejs`); ONE job runs `scripts/test-gate.sh` (single pass: clippy-driver lints + the whole workspace suite — the same script `scripts/dev.sh check` runs locally; no cargo features exist today, `full` returns when web/oidc land in v3). fmt + rustdoc gate separately; static analysis (repo/SAST/deps/SBOM) runs in the `ursine-static` image via `scripts/static-check.sh` (policy: `docs/STATIC-ANALYSIS.md`). (`nodejs` in-container so JS actions work on musl.)
 2. **nix flake**: `nixos/nix` **container** → `nix flake check` + `nix build --out-link artifacts/result` on every push. `flake.nix` packages the **pinned musl artifact** (`nix/binary.nix`, URL+sha256): nixpkgs does not cache musl toolchains (stable included), so from-source musl builds take hours; Alpine builds the binary, Nix publishes it reproducibly.
 3. **publish**: on tag, same `nixos/nix` container builds musl binaries and CI attaches them to a GitHub Release; the flake itself is "published" by living in the repo (`github:skea999/ursine`).
 
@@ -135,7 +135,7 @@ GitHub CI (`.github/workflows/ci.yml`, to be created at v0.1) — **all jobs in 
 ## Build order
 
 1. Workspace + `ursine-api` (types, Capability, tri-state config, errors)
-2. `ursined` skeleton: unix socket, peer creds, PAM handshake, capabilities scan, JSONL audit
+2. `ursined` skeleton: unix socket, peer creds, shadow handshake, capabilities scan, JSONL audit
 3. packages module: nix first (the unique piece), then apk, flatpak
 4. GUI: store + snapshots
 5. users, niri modules
@@ -144,5 +144,6 @@ GitHub CI (`.github/workflows/ci.yml`, to be created at v0.1) — **all jobs in 
 ## Future architecture
 
 - [Go daemon migration — future design](go-daemon-future.md): static Go daemon,
-  embedded Rust PAM helpers for musl/glibc, runtime selection, packaging and
-  security constraints. Proposed only; 0.7.0 remains Rust.
+  runtime selection, packaging and security constraints. Proposed only; 0.7.0
+  remains Rust. (Its PAM helper split is obsolete since the shadow-auth
+  switch — see the note in that doc.)

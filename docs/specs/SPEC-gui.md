@@ -16,7 +16,7 @@ The native frontend `ursine`: **libcosmic** app, thin client of `ursined`. GNOME
 
 | Screen | Content |
 |---|---|
-| Login | PAM prompt (user pre-filled from session, password field); on success token kept in process memory only |
+| Login | password prompt (user pre-filled from session, password field); on success token kept in process memory only |
 | Home/Overview | module cards: enabled (green, opens panel) / disabled (grey + reason + fix command + "Run fix" if trivial) — from `capabilities.list` |
 | Store (nix) | search field (results list w/ description), installed list, install/remove/upgrade buttons with progress, per-user selector (asUser dropdown) |
 | APK | installed/search rows, install/remove/upgrade, repository refresh |
