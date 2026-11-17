@@ -804,12 +804,11 @@ impl StoreState {
                     ),
                 )
                 .into();
-            // Uniform row shape: name as the title, URL + scope as
-            // the detail (scope distinguishes duplicate names).
-            let detail = format!("{} · {}", repository.url, repository.scope);
+            // Exactly the apk row shape: identity as the title, the
+            // full URL as the single detail line, Remove on the right.
             repo_items.push(crate::package_ui::repository_row(
                 repository.name.clone(),
-                Some(detail),
+                Some(repository.url.clone()),
                 vec![action],
             ));
         }

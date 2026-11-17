@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- nix repository rows are now **exactly the apk shape** (user
+  decision): identity (`flake:ursine`) as the title, the full URL as
+  the single detail line, Remove on the right — the `· scope` suffix
+  is gone from the row (the confirm still says "system repository"
+  for global entries).
+
 ## [0.39.0] — 2026-11-16
 
 ### Fixed
