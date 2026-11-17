@@ -19,6 +19,18 @@ use crate::app::Message;
 // Data contract
 // ---------------------------------------------------------------------------
 
+/// Rows rendered per page: keeps the per-frame widget count bounded no
+/// matter how large the installed list or the generation history is.
+pub const PAGE_SIZE: usize = 50;
+
+/// `(page_count, clamped page, start index)` for `len` items — the
+/// single pagination rule shared by every list.
+pub fn page_bounds(len: usize, page: usize) -> (usize, usize, usize) {
+    let page_count = len.div_ceil(PAGE_SIZE);
+    let page = page.min(page_count.saturating_sub(1));
+    (page_count, page, page * PAGE_SIZE)
+}
+
 /// One settings section: title + rows. Rows are data, built by the
 /// per-manager adapters — this module owns only the wrapper and order.
 pub struct SectionVm<'a> {
@@ -98,11 +110,13 @@ pub struct FilterVm {
 
 pub struct ListVm<'a> {
     pub title: String,
-    /// True while the list lives in the half-page browser dialog: the
-    /// page then shows only a compact "open" row.
-    pub browsing: bool,
     /// Opens the browser dialog.
     pub browse: Message,
+    /// Pagination of the rows (clamped by the adapter).
+    pub page: usize,
+    pub page_count: usize,
+    pub page_previous: Message,
+    pub page_next: Message,
     /// Filter row rendered first inside the section.
     pub filter: Option<FilterVm>,
     /// Transient context rows (e.g. nix "Loading profile…").
@@ -142,8 +156,7 @@ pub struct PackageVm<'a> {
     pub pattern: PatternSection,
     pub list: ListVm<'a>,
     pub generations: Option<SectionVm<'a>>,
-    /// Generations live in the half-page browser dialog (nix only).
-    pub generations_browsing: bool,
+    /// Opens the generations browser dialog (nix only).
     pub generations_browse: Message,
 }
 
@@ -219,7 +232,6 @@ pub fn view<'a>(vm: PackageVm<'a>) -> Element<'a, Message> {
         pattern,
         list,
         generations,
-        generations_browsing,
         generations_browse,
     } = vm;
 
@@ -261,19 +273,12 @@ pub fn view<'a>(vm: PackageVm<'a>) -> Element<'a, Message> {
             SectionId::Search => search.take().map(search_section),
             SectionId::Repositories => repositories.take().map(section_block),
             SectionId::Pattern => pattern.take().map(pattern_section),
-            SectionId::Installed => match list.take() {
-                Some(list) if list.browsing => Some(compact_list_section(&list)),
-                Some(list) => Some(list_section(list)),
-                None => None,
-            },
-            SectionId::Generations => match generations.take() {
-                Some(section) if generations_browsing => Some(compact_generations_section(
-                    section.title,
-                    generations_browse.clone(),
-                )),
-                Some(section) => Some(section_block(section)),
-                None => None,
-            },
+            // The page ALWAYS shows the compact row: the full list
+            // lives only in the browser dialog (`Application::dialog`).
+            SectionId::Installed => list.take().map(|list| compact_list_section(&list)),
+            SectionId::Generations => generations.take().map(|section| {
+                compact_generations_section(section.title, generations_browse.clone())
+            }),
         };
         if let Some(section) = section {
             items.push(section);
@@ -486,6 +491,23 @@ fn list_section(list: ListVm<'_>) -> Element<'_, Message> {
             text_input("Type to filter…", filter.value.clone())
                 .on_input(filter.on_input)
                 .width(Length::Fill),
+        ));
+    }
+    if list.page_count > 1 {
+        section = section.add(settings::item(
+            "Pages",
+            row(vec![
+                button::text("Previous")
+                    .on_press_maybe((list.page > 0).then_some(list.page_previous.clone()))
+                    .into(),
+                text(format!("{} of {}", list.page + 1, list.page_count)).into(),
+                button::text("Next")
+                    .on_press_maybe(
+                        (list.page + 1 < list.page_count).then_some(list.page_next.clone()),
+                    )
+                    .into(),
+            ])
+            .spacing(8),
         ));
     }
     for (label, value) in list.status {
@@ -710,8 +732,11 @@ mod tests {
             },
             list: ListVm {
                 title: "Installed (0)".to_string(),
-                browsing: false,
                 browse: Message::PackageListBrowserClose,
+                page: 0,
+                page_count: 1,
+                page_previous: Message::PackageListBrowserClose,
+                page_next: Message::PackageListBrowserClose,
                 filter: None,
                 status: Vec::new(),
                 empty_note: None,
@@ -722,9 +747,20 @@ mod tests {
                 title: "Generations".to_string(),
                 items: Vec::new(),
             }),
-            generations_browsing: false,
             generations_browse: Message::StoreGenerationsBrowserClose,
         }
+    }
+
+    #[test]
+    fn page_bounds_clamps_and_slices() {
+        assert_eq!(page_bounds(0, 0), (0, 0, 0));
+        assert_eq!(page_bounds(1, 0), (1, 0, 0));
+        assert_eq!(page_bounds(50, 0), (1, 0, 0));
+        assert_eq!(page_bounds(51, 0), (2, 0, 0));
+        assert_eq!(page_bounds(120, 1), (3, 1, 50));
+        // A stale high page clamps to the last page (never out of range).
+        assert_eq!(page_bounds(120, 99), (3, 2, 100));
+        assert_eq!(page_bounds(0, 99), (0, 0, 0));
     }
 
     /// THE alignment guarantee: every manager renders the canonical

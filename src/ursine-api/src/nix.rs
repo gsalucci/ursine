@@ -25,6 +25,10 @@ pub struct InstalledPackage {
     /// `nix eval` per flake reference, absent when eval is slow/fails.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Derivation version parsed from the store path
+    /// (`/nix/store/<hash>-<name>-<version>`), best-effort.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
     /// Store paths owned by this element.
     #[serde(default)]
     pub store_paths: Vec<String>,
@@ -139,11 +143,22 @@ mod tests {
             url: Some("flake:nixpkgs#hello".into()),
             store_paths: vec!["/nix/store/abc-hello-2.12".into()],
             active: true,
-
             description: None,
+            version: None,
         };
         let s = serde_json::to_string(&p).unwrap();
         assert_eq!(serde_json::from_str::<InstalledPackage>(&s).unwrap(), p);
+        // The new `version` field round-trips too (and is skipped when None).
+        let mut versioned = p.clone();
+        versioned.version = Some("2.12".into());
+        let s = serde_json::to_string(&versioned).unwrap();
+        assert!(s.contains("\"version\":\"2.12\""));
+        assert_eq!(
+            serde_json::from_str::<InstalledPackage>(&s).unwrap(),
+            versioned
+        );
+        let plain = serde_json::to_string(&p).unwrap();
+        assert!(!plain.contains("\"version\""));
     }
 
     #[test]

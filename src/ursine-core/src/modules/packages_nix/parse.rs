@@ -10,6 +10,16 @@ use ursine_api::{installable_from_attr, ApiError, InstalledPackage, SearchResult
 /// lexicographic order are always the ones returned.
 const MAX_SEARCH_RESULTS: usize = 200;
 
+/// `/nix/store/<hash>-<name>-<version>` → `<version>` (best effort:
+/// store paths embed the derivation name and version; a mismatched
+/// element name simply yields None).
+fn store_path_version(store_path: &str, name: &str) -> Option<String> {
+    let base = store_path.rsplit('/').next()?;
+    let derivation = base.split_once('-')?.1;
+    let version = derivation.strip_prefix(name)?.strip_prefix('-')?;
+    (!version.is_empty()).then(|| version.to_string())
+}
+
 /// `nix profile list --json` → sorted package list.
 pub(super) fn parse_profile_list(json: &str) -> Result<Vec<InstalledPackage>, ApiError> {
     #[derive(Deserialize)]
@@ -37,14 +47,21 @@ pub(super) fn parse_profile_list(json: &str) -> Result<Vec<InstalledPackage>, Ap
     let mut out: Vec<InstalledPackage> = parsed
         .elements
         .into_iter()
-        .map(|(name, e)| InstalledPackage {
-            name,
-            attr_path: e.attr_path,
-            original_url: e.original_url,
-            url: e.url,
-            description: None,
-            store_paths: e.store_paths,
-            active: e.active,
+        .map(|(name, e)| {
+            let version = e
+                .store_paths
+                .first()
+                .and_then(|path| store_path_version(path, &name));
+            InstalledPackage {
+                name,
+                attr_path: e.attr_path,
+                original_url: e.original_url,
+                url: e.url,
+                description: None,
+                version,
+                store_paths: e.store_paths,
+                active: e.active,
+            }
         })
         .collect();
     out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -98,6 +115,24 @@ pub(super) fn parse_search(json: &str) -> Result<SearchPage, ApiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn store_path_version_parses_the_derivation_suffix() {
+        assert_eq!(
+            store_path_version(
+                "/nix/store/pbwzb9l30s2y4zki7799xr04w5hikaz9-bleachbit-5.0.2",
+                "bleachbit"
+            ),
+            Some("5.0.2".to_string())
+        );
+        // Element name mismatch or no version → None (never guess).
+        assert_eq!(
+            store_path_version("/nix/store/abc123-hello-1.0", "goodbye"),
+            None
+        );
+        assert_eq!(store_path_version("/nix/store/abc123-hello", "hello"), None);
+        assert_eq!(store_path_version("not-a-store-path", "x"), None);
+    }
 
     // Realistic sample of `nix profile list --json` (nix >= 2.19).
     const LIST_JSON: &str = r#"{

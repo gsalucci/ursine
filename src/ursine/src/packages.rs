@@ -94,6 +94,11 @@ pub struct PackagesState {
     pub installed_filter: String,
     /// The installed list is shown in the half-page browser dialog.
     pub list_browser: bool,
+    /// Current page of the installed list (browser dialog).
+    pub installed_page: usize,
+    /// Lowercased row titles for the CURRENT source: the filter runs
+    /// against these without allocating per frame.
+    pub filter_keys: Vec<String>,
     /// (operation, pattern) waiting for confirmation.
     pub pending_pattern: Option<(PatternOp, String)>,
     pub error: Option<String>,
@@ -139,6 +144,8 @@ impl Default for PackagesState {
             pattern_result: None,
             installed_filter: String::new(),
             list_browser: false,
+            installed_page: 0,
+            filter_keys: Vec::new(),
             pending_pattern: None,
             orphans: None,
             search_busy: false,
@@ -178,6 +185,8 @@ impl PackagesState {
         self.pattern_result = None;
         self.installed_filter.clear();
         self.list_browser = false;
+        self.installed_page = 0;
+        self.filter_keys.clear();
         self.updates_checked = false;
         self.updates_checking = false;
         self.updates_seq = self.updates_seq.wrapping_add(1);
@@ -198,6 +207,25 @@ impl PackagesState {
         self.flatpak.clear();
         self.flatpak_updates.clear();
         self.error = None;
+        self.rebuild_filter_keys();
+    }
+
+    /// Precompute the lowercased row titles whenever the source list
+    /// changes — filtering then costs zero allocations per frame.
+    pub fn rebuild_filter_keys(&mut self) {
+        self.filter_keys = match self.kind {
+            Some(PackageKind::Apk) => self
+                .apk
+                .iter()
+                .map(|package| format!("{} {}", package.name, package.version).to_lowercase())
+                .collect(),
+            Some(PackageKind::Flatpak) => self
+                .flatpak
+                .iter()
+                .map(|package| format!("{} {}", package.name, package.version).to_lowercase())
+                .collect(),
+            None => Vec::new(),
+        };
     }
 
     pub fn apply_apk_updates(&mut self, updates: Vec<ApkUpdate>) {
@@ -247,6 +275,7 @@ impl PackagesState {
         self.flatpak = packages;
         self.apk.clear();
         self.error = None;
+        self.rebuild_filter_keys();
     }
 
     pub fn apply_flatpak_updates(&mut self, updates: Vec<FlatpakPackage>) {
@@ -267,8 +296,8 @@ impl PackagesState {
         updates_auto: ursine_api::UpdatesAuto,
     ) -> crate::package_ui::PackageVm<'_> {
         use crate::package_ui::{
-            ConfirmVm, FilterVm, ListVm, PackageVm, RefreshVm, RowVm, SearchVm, SectionVm,
-            UpgradeAllVm, UpgradeVm,
+            page_bounds, ConfirmVm, FilterVm, ListVm, PackageVm, RefreshVm, RowVm, SearchVm,
+            SectionVm, UpgradeAllVm, UpgradeVm, PAGE_SIZE,
         };
 
         let manager = match kind {
@@ -666,141 +695,170 @@ impl PackagesState {
         };
 
         // --- Bottom list (Installed / search results) ---
-        let rows: Vec<RowVm<'_>> = match kind {
-            PackageKind::Apk => self
-                .apk
-                .iter()
-                .map(|package| RowVm {
-                    title: format!("{} {}", package.name, package.version),
-                    description: package
-                        .description
-                        .as_deref()
-                        .filter(|value| !value.is_empty())
-                        .map(str::to_string),
-                    repository: package.origin.as_ref().map(|origin| {
-                        package
-                            .origin_label
-                            .as_ref()
-                            .map_or_else(|| origin.clone(), |label| format!("{label} · {origin}"))
-                    }),
-                    notes: Vec::new(),
-                    actions: if self.searching {
-                        vec![button::text("Install")
-                            .on_press_maybe(
-                                (!self.busy && !self.action_busy)
-                                    .then_some(Message::PackageInstallDirect(package.name.clone())),
-                            )
-                            .into()]
-                    } else if package.protected {
-                        vec![text("protected").into()]
-                    } else {
-                        let mut buttons: Vec<Element<'_, Message>> = Vec::with_capacity(2);
-                        if self.apk_updates.iter().any(|u| u.name == package.name) {
-                            buttons.push(
-                                button::text("Upgrade")
-                                    .on_press_maybe((!self.busy && !self.action_busy).then_some(
-                                        Message::ApkUpgradeRequested(package.name.clone()),
-                                    ))
-                                    .into(),
-                            );
-                        }
-                        buttons.push(
-                            button::text("Remove")
-                                .on_press_maybe((!self.busy && !self.action_busy).then_some(
-                                    Message::PackageRemoveRequested(
-                                        kind,
-                                        package.name.clone(),
-                                        package.name.clone(),
-                                    ),
-                                ))
-                                .into(),
-                        );
-                        buttons
-                    },
-                })
-                .collect(),
-            PackageKind::Flatpak => self
-                .flatpak
-                .iter()
-                .map(|package| {
-                    let mut identity: Vec<&str> = vec![package.app_id.as_str()];
-                    if !package.branch.is_empty() {
-                        identity.push(&package.branch);
-                    }
-                    if !package.origin.is_empty() {
-                        identity.push(&package.origin);
-                    }
-                    let mut line = identity.join(" · ");
-                    if !package.origin.is_empty() {
-                        if let Some(remote) = self
-                            .flatpak_remotes
-                            .iter()
-                            .find(|remote| remote.name == package.origin)
-                        {
-                            line.push_str(" · ");
-                            line.push_str(&remote.url);
-                        }
-                    }
-                    let actions: Vec<Element<'_, Message>> = if self.searching {
-                        vec![button::text("Install")
-                            .on_press_maybe(
-                                (!self.busy && !self.action_busy).then_some(
-                                    Message::PackageInstallDirect(package.app_id.clone()),
-                                ),
-                            )
-                            .into()]
-                    } else if package.kind == FlatpakRefKind::Runtime {
-                        vec![text("protected").into()]
-                    } else {
-                        let mut buttons: Vec<Element<'_, Message>> = Vec::with_capacity(3);
-                        if self
-                            .flatpak_updates
-                            .iter()
-                            .any(|u| u.app_id == package.app_id)
-                        {
-                            buttons.push(
-                                button::text("Upgrade")
-                                    .on_press_maybe((!self.busy && !self.action_busy).then_some(
-                                        Message::FlatpakUpgradeRequested(package.app_id.clone()),
-                                    ))
-                                    .into(),
-                            );
-                        }
-                        buttons.push(
-                            button::text("Remove")
-                                .on_press_maybe((!self.busy && !self.action_busy).then_some(
-                                    Message::PackageRemoveRequested(
-                                        kind,
-                                        package.app_id.clone(),
-                                        package.app_id.clone(),
-                                    ),
-                                ))
-                                .into(),
-                        );
-                        buttons
-                    };
-                    RowVm {
+        // Filter the SOURCE against precomputed keys (zero allocations
+        // per frame), then build ONLY the current page's widgets.
+        let query = self.installed_filter.trim().to_lowercase();
+        let filtering = !query.is_empty();
+        let (matched, rows): (usize, Vec<RowVm<'_>>) = match kind {
+            PackageKind::Apk => {
+                let matches: Vec<&ApkPackage> = self
+                    .apk
+                    .iter()
+                    .zip(self.filter_keys.iter())
+                    .filter(|(_, key)| key.contains(&query))
+                    .map(|(package, _)| package)
+                    .collect();
+                let len = matches.len();
+                let (_, _, start) = page_bounds(len, self.installed_page);
+                let rows = matches
+                    .into_iter()
+                    .skip(start)
+                    .take(PAGE_SIZE)
+                    .map(|package| RowVm {
                         title: format!("{} {}", package.name, package.version),
                         description: package
                             .description
                             .as_deref()
                             .filter(|value| !value.is_empty())
                             .map(str::to_string),
-                        repository: Some(line),
+                        repository: package.origin.as_ref().map(|origin| {
+                            package.origin_label.as_ref().map_or_else(
+                                || origin.clone(),
+                                |label| format!("{label} · {origin}"),
+                            )
+                        }),
                         notes: Vec::new(),
-                        actions,
-                    }
-                })
-                .collect(),
+                        actions: if self.searching {
+                            vec![button::text("Install")
+                                .on_press_maybe(
+                                    (!self.busy && !self.action_busy).then_some(
+                                        Message::PackageInstallDirect(package.name.clone()),
+                                    ),
+                                )
+                                .into()]
+                        } else if package.protected {
+                            vec![text("protected").into()]
+                        } else {
+                            let mut buttons: Vec<Element<'_, Message>> = Vec::with_capacity(2);
+                            if self.apk_updates.iter().any(|u| u.name == package.name) {
+                                buttons.push(
+                                    button::text("Upgrade")
+                                        .on_press_maybe(
+                                            (!self.busy && !self.action_busy).then_some(
+                                                Message::ApkUpgradeRequested(package.name.clone()),
+                                            ),
+                                        )
+                                        .into(),
+                                );
+                            }
+                            buttons.push(
+                                button::text("Remove")
+                                    .on_press_maybe((!self.busy && !self.action_busy).then_some(
+                                        Message::PackageRemoveRequested(
+                                            kind,
+                                            package.name.clone(),
+                                            package.name.clone(),
+                                        ),
+                                    ))
+                                    .into(),
+                            );
+                            buttons
+                        },
+                    })
+                    .collect();
+                (len, rows)
+            }
+            PackageKind::Flatpak => {
+                let matches: Vec<&FlatpakPackage> = self
+                    .flatpak
+                    .iter()
+                    .zip(self.filter_keys.iter())
+                    .filter(|(_, key)| key.contains(&query))
+                    .map(|(package, _)| package)
+                    .collect();
+                let len = matches.len();
+                let (_, _, start) = page_bounds(len, self.installed_page);
+                let rows = matches
+                    .into_iter()
+                    .skip(start)
+                    .take(PAGE_SIZE)
+                    .map(|package| {
+                        let mut identity: Vec<&str> = vec![package.app_id.as_str()];
+                        if !package.branch.is_empty() {
+                            identity.push(&package.branch);
+                        }
+                        if !package.origin.is_empty() {
+                            identity.push(&package.origin);
+                        }
+                        let mut line = identity.join(" · ");
+                        if !package.origin.is_empty() {
+                            if let Some(remote) = self
+                                .flatpak_remotes
+                                .iter()
+                                .find(|remote| remote.name == package.origin)
+                            {
+                                line.push_str(" · ");
+                                line.push_str(&remote.url);
+                            }
+                        }
+                        let actions: Vec<Element<'_, Message>> = if self.searching {
+                            vec![button::text("Install")
+                                .on_press_maybe((!self.busy && !self.action_busy).then_some(
+                                    Message::PackageInstallDirect(package.app_id.clone()),
+                                ))
+                                .into()]
+                        } else if package.kind == FlatpakRefKind::Runtime {
+                            vec![text("protected").into()]
+                        } else {
+                            let mut buttons: Vec<Element<'_, Message>> = Vec::with_capacity(3);
+                            if self
+                                .flatpak_updates
+                                .iter()
+                                .any(|u| u.app_id == package.app_id)
+                            {
+                                buttons.push(
+                                    button::text("Upgrade")
+                                        .on_press_maybe(
+                                            (!self.busy && !self.action_busy).then_some(
+                                                Message::FlatpakUpgradeRequested(
+                                                    package.app_id.clone(),
+                                                ),
+                                            ),
+                                        )
+                                        .into(),
+                                );
+                            }
+                            buttons.push(
+                                button::text("Remove")
+                                    .on_press_maybe((!self.busy && !self.action_busy).then_some(
+                                        Message::PackageRemoveRequested(
+                                            kind,
+                                            package.app_id.clone(),
+                                            package.app_id.clone(),
+                                        ),
+                                    ))
+                                    .into(),
+                            );
+                            buttons
+                        };
+                        RowVm {
+                            title: format!("{} {}", package.name, package.version),
+                            description: package
+                                .description
+                                .as_deref()
+                                .filter(|value| !value.is_empty())
+                                .map(str::to_string),
+                            repository: Some(line),
+                            notes: Vec::new(),
+                            actions,
+                        }
+                    })
+                    .collect();
+                (len, rows)
+            }
         };
-        // Filter first: the notes and the count describe what is shown.
-        let query = self.installed_filter.trim().to_lowercase();
-        let rows: Vec<RowVm<'_>> = rows
-            .into_iter()
-            .filter(|row| row.title.to_lowercase().contains(&query))
-            .collect();
-        let filtering = !query.is_empty();
-        let listed = rows.len();
+        let (page_count, page, _) = page_bounds(matched, self.installed_page);
+        let listed = matched;
         let empty_note = if rows.is_empty() {
             if filtering || self.searching {
                 Some(("No matches".to_string(), "No packages matched.".to_string()))
@@ -813,8 +871,11 @@ impl PackagesState {
             None
         };
         let list = ListVm {
-            browsing: self.list_browser,
             browse: Message::PackageListBrowserOpen,
+            page,
+            page_count,
+            page_previous: Message::PackageListPagePrevious,
+            page_next: Message::PackageListPageNext,
             title: format!(
                 "{} ({listed})",
                 if self.searching {
@@ -858,8 +919,6 @@ impl PackagesState {
             pattern,
             list,
             generations: None,
-            // No generations slot on apk/flatpak: never browsed.
-            generations_browsing: false,
             generations_browse: Message::PackageListBrowserClose,
         }
     }

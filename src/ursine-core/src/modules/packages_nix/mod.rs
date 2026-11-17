@@ -1104,6 +1104,8 @@ mod tests {
             active: true,
 
             description: None,
+
+            version: None,
         };
         let elements = vec![
             element(
@@ -1342,6 +1344,8 @@ global flake:blender-bin github:edolstra/nix-warez?dir=blender\n";
                 active: true,
 
                 description: None,
+
+                version: None,
             },
             InstalledPackage {
                 name: "hello".into(),
@@ -1352,6 +1356,8 @@ global flake:blender-bin github:edolstra/nix-warez?dir=blender\n";
                 active: true,
 
                 description: None,
+
+                version: None,
             },
         ];
         assert_eq!(

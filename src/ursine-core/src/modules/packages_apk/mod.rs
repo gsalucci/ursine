@@ -487,26 +487,47 @@ fn protected_names() -> Result<Vec<String>, ApiError> {
 }
 
 fn parse_installed(versioned: &str, names: &str, protected: &[String]) -> Vec<ApkPackage> {
-    let names: Vec<&str> = names.lines().filter(|line| !line.is_empty()).collect();
+    // Set lookups keep the parse linear: the old per-line scan formatted
+    // `"{name}-"` for EVERY installed name (millions of allocations on
+    // big systems — the UI freeze the user hit).
+    let name_set: std::collections::HashSet<&str> =
+        names.lines().filter(|line| !line.is_empty()).collect();
+    let protected: std::collections::HashSet<&str> = protected.iter().map(String::as_str).collect();
     let mut rows = Vec::new();
     for line in versioned.lines().filter(|line| !line.is_empty()) {
-        let name = names
-            .iter()
-            .filter(|name| line.starts_with(&format!("{name}-")))
-            .max_by_key(|name| name.len())
-            .copied()
-            .unwrap_or(line);
-        let version = line
-            .strip_prefix(name)
-            .and_then(|rest| rest.strip_prefix('-'))
-            .unwrap_or_default()
-            .to_string();
+        // Fast path: the same `name-version` split the search parser
+        // uses, validated against the installed set.
+        let (split_name, split_version) = split_id(line);
+        let (name, version) = if name_set.contains(split_name.as_str()) {
+            (split_name, split_version)
+        } else {
+            // Fallback: longest installed name prefixing the line —
+            // byte comparisons only, no per-candidate formatting.
+            name_set
+                .iter()
+                .filter(|name| {
+                    line.starts_with(*name) && line.as_bytes().get(name.len()) == Some(&b'-')
+                })
+                .max_by_key(|name| name.len())
+                .copied()
+                .map_or_else(
+                    // Legacy behaviour: the whole line becomes the name.
+                    || (line.to_string(), String::new()),
+                    |name| {
+                        (
+                            name.to_string(),
+                            line.get(name.len() + 1..).unwrap_or_default().to_string(),
+                        )
+                    },
+                )
+        };
+        let is_protected = protected.contains(name.as_str());
         rows.push(ApkPackage {
             id: line.to_string(),
-            name: name.to_string(),
+            name,
             version,
             description: None,
-            protected: protected.iter().any(|entry| entry == name),
+            protected: is_protected,
             origin: None,
             origin_label: None,
         });

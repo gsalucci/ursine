@@ -190,6 +190,9 @@ pub enum Message {
     /// Half-page browser for the installed list.
     PackageListBrowserOpen,
     PackageListBrowserClose,
+    /// Installed-list pagination (browser dialog).
+    PackageListPagePrevious,
+    PackageListPageNext,
     /// Dry-run the pattern against the installed list.
     PackagePatternPreviewRequested,
     /// Pattern preview finished (`would_change` names).
@@ -511,6 +514,11 @@ pub enum Message {
     StoreListBrowserClose,
     StoreGenerationsBrowserOpen,
     StoreGenerationsBrowserClose,
+    /// List/generations pagination (browser dialogs).
+    StoreListPagePrevious,
+    StoreListPageNext,
+    StoreGenerationsPagePrevious,
+    StoreGenerationsPageNext,
     StoreGenerationChanged(String),
     StoreKeepChanged(String),
     StoreKeepPreset(usize),
@@ -721,13 +729,28 @@ impl cosmic::Application for App {
                 // The preview belonged to the previous pattern.
                 self.packages.pattern_result = None;
             }
-            Message::PackageFilterChanged(value) => self.packages.installed_filter = value,
+            Message::PackageFilterChanged(value) => {
+                self.packages.installed_filter = value;
+                self.packages.installed_page = 0;
+            }
             Message::PackageListBrowserOpen => self.packages.list_browser = true,
             Message::PackageListBrowserClose => self.packages.list_browser = false,
             Message::StoreListBrowserOpen => self.store.list_browser = true,
             Message::StoreListBrowserClose => self.store.list_browser = false,
             Message::StoreGenerationsBrowserOpen => self.store.generations_browser = true,
             Message::StoreGenerationsBrowserClose => self.store.generations_browser = false,
+            Message::PackageListPagePrevious => {
+                self.packages.installed_page = self.packages.installed_page.saturating_sub(1);
+            }
+            Message::PackageListPageNext => self.packages.installed_page += 1,
+            Message::StoreListPagePrevious => {
+                self.store.installed_page = self.store.installed_page.saturating_sub(1);
+            }
+            Message::StoreListPageNext => self.store.installed_page += 1,
+            Message::StoreGenerationsPagePrevious => {
+                self.store.generations_page = self.store.generations_page.saturating_sub(1);
+            }
+            Message::StoreGenerationsPageNext => self.store.generations_page += 1,
             Message::PackagePatternPreviewRequested => return self.request_pattern_preview(),
             Message::PackagePatternPreviewFinished(epoch, result) => {
                 return self.finish_pattern_preview(epoch, result)
@@ -1957,7 +1980,10 @@ impl cosmic::Application for App {
                 self.finish_store_search(epoch, seq, &scope, result);
             }
             Message::StoreInstallChanged(value) => self.store.install_input = value,
-            Message::StoreFilterChanged(value) => self.store.installed_filter = value,
+            Message::StoreFilterChanged(value) => {
+                self.store.installed_filter = value;
+                self.store.installed_page = 0;
+            }
             Message::StoreRegexChanged(value) => {
                 self.store.regex = value;
                 self.store.pattern_result = None;
@@ -2847,6 +2873,7 @@ impl App {
         self.packages.busy = true;
         self.packages.searching = false;
         self.packages.search_busy = false;
+        self.packages.installed_page = 0;
         self.packages.error = None;
         // A fresh load invalidates the previous count until the check
         // (automatic when the preference is on) completes.
@@ -3199,6 +3226,7 @@ impl App {
         }
         self.packages.busy = false;
         self.packages.search_busy = false;
+        self.packages.installed_page = 0;
         match result {
             Ok(packages) => {
                 self.packages.apply_apk(packages);
@@ -3224,6 +3252,7 @@ impl App {
         }
         self.packages.busy = false;
         self.packages.search_busy = false;
+        self.packages.installed_page = 0;
         match result {
             Ok(packages) => {
                 self.packages.apply_flatpak(packages);
@@ -6155,6 +6184,10 @@ impl App {
         self.store.search_done = false;
         self.store.search_truncated = false;
         self.store.search_error = None;
+        // Keys and page must follow the source swap: stale keys
+        // silently drop rows when zipped against the new source.
+        self.store.rebuild_filter_keys();
+        self.store.installed_page = 0;
         let token = session.token.clone();
         let repos_token = token.clone();
         let as_user = scope.as_user();
@@ -6302,7 +6335,10 @@ impl App {
                     self.store.updates_checking = false;
                 }
                 self.store.packages = snapshot.packages;
+                self.store.rebuild_filter_keys();
                 self.store.generations = snapshot.generations;
+                // A shorter history must not leave the page past its end.
+                self.store.generations_page = 0;
                 self.store.loaded_scope = scope;
                 self.store.error = None;
             }
@@ -6369,6 +6405,8 @@ impl App {
                 self.store.search_truncated = page.truncated;
                 self.store.search_done = true;
                 self.store.search_error = None;
+                self.store.installed_page = 0;
+                self.store.rebuild_filter_keys();
             }
             Err(error) => {
                 if self.handle_session_error(&error) {

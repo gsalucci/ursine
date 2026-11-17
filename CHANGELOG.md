@@ -1,5 +1,31 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **The browser open button now actually appears** (0.38.0 bug): the
+  page always renders the compact `Open list…` / `Browse generations…`
+  row — the old logic only showed it while the browser was already
+  open, so nothing ever changed on screen.
+- **apk no longer freezes the UI on big systems**: `parse_installed`
+  was O(n²) with a `format!` per candidate (millions of allocations
+  per load) — it now uses set lookups with the `name-version` split
+  (linear, allocation-free comparisons).
+
+### Added
+
+- **Pagination everywhere it matters** (user decision): installed
+  lists (all three managers) and nix generations render 50 rows per
+  page (`Previous / Page N of M / Next` in the browser dialog);
+  `page_bounds` is the single shared rule.
+- **Zero-allocation filtering**: row titles are lowercased once when
+  the list changes (`filter_keys`), not on every frame; nix
+  generations scan entry boundaries without building strings off-page.
+- **nix installed rows show the version** (`name version` like the
+  others), parsed from the store path
+  (`/nix/store/<hash>-<name>-<version>`, best-effort).
+
 ## [0.38.0] — 2026-11-16
 
 ### Added

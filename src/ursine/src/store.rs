@@ -374,6 +374,12 @@ pub struct StoreState {
     pub list_browser: bool,
     /// The generations are shown in the half-page browser dialog.
     pub generations_browser: bool,
+    /// Current pages (browser dialog).
+    pub installed_page: usize,
+    pub generations_page: usize,
+    /// Lowercased row titles for the CURRENT list source (see
+    /// `rebuild_filter_keys`): filtering costs no allocations per frame.
+    pub filter_keys: Vec<String>,
     pub action_label: Option<String>,
     pub action_started: Option<std::time::Instant>,
 }
@@ -417,6 +423,9 @@ impl Default for StoreState {
             installed_filter: String::new(),
             list_browser: false,
             generations_browser: false,
+            installed_page: 0,
+            generations_page: 0,
+            filter_keys: Vec::new(),
         }
     }
 }
@@ -479,6 +488,9 @@ impl StoreState {
         self.installed_filter.clear();
         self.list_browser = false;
         self.generations_browser = false;
+        self.installed_page = 0;
+        self.generations_page = 0;
+        self.filter_keys.clear();
     }
 
     /// Start a search and return its fence. Stale replies must be ignored.
@@ -489,6 +501,9 @@ impl StoreState {
         self.search_truncated = false;
         self.search_results.clear();
         self.search_error = None;
+        self.installed_page = 0;
+        // The list shows the installed profile again while in flight.
+        self.rebuild_filter_keys();
         self.search_seq
     }
 
@@ -511,6 +526,35 @@ impl StoreState {
 
     /// Actions target exactly the scope whose data is on screen, and no load is
     /// racing that scope change.
+    /// Precompute the lowercased row titles for the CURRENT source
+    /// (installed profile or search results) — the filter then costs
+    /// zero allocations per frame.
+    pub fn rebuild_filter_keys(&mut self) {
+        self.filter_keys = if self.search_done {
+            self.search_results
+                .iter()
+                .map(|result| {
+                    match (&result.pname, &result.version) {
+                        (Some(name), Some(version)) => format!("{name} {version}"),
+                        (Some(name), None) => name.clone(),
+                        (None, _) => result.attr.clone(),
+                    }
+                    .to_lowercase()
+                })
+                .collect()
+        } else {
+            self.packages
+                .iter()
+                .map(|package| {
+                    package.version.as_deref().map_or_else(
+                        || package.name.to_lowercase(),
+                        |version| format!("{} {version}", package.name).to_lowercase(),
+                    )
+                })
+                .collect()
+        };
+    }
+
     pub fn scope_ready(&self) -> bool {
         !self.busy && !self.action_busy && self.loaded_scope.matches(self.target_user().as_deref())
     }
@@ -825,9 +869,24 @@ impl StoreState {
         // --- Bottom list: search results while a search is done,
         // otherwise the installed profile (apk pattern) ---
         let showing_results = self.search_done;
-        let raw_rows: Vec<RowVm<'_>> = if showing_results {
-            self.search_results
+        // Filter the SOURCE against precomputed keys (zero allocations
+        // per frame), then build ONLY the current page's widgets.
+        let query = self.installed_filter.trim().to_lowercase();
+        let filtering = !query.is_empty();
+        let (matched, rows): (usize, Vec<RowVm<'_>>) = if showing_results {
+            let matches: Vec<&SearchResult> = self
+                .search_results
                 .iter()
+                .zip(self.filter_keys.iter())
+                .filter(|(_, key)| key.contains(&query))
+                .map(|(result, _)| result)
+                .collect();
+            let len = matches.len();
+            let (_, _, start) = crate::package_ui::page_bounds(len, self.installed_page);
+            let rows = matches
+                .into_iter()
+                .skip(start)
+                .take(crate::package_ui::PAGE_SIZE)
                 .map(|result| RowVm {
                     title: match (&result.pname, &result.version) {
                         (Some(name), Some(version)) => format!("{name} {version}"),
@@ -856,10 +915,22 @@ impl StoreState {
                         }))
                         .into()],
                 })
-                .collect()
+                .collect();
+            (len, rows)
         } else {
-            self.packages
+            let matches: Vec<&InstalledPackage> = self
+                .packages
                 .iter()
+                .zip(self.filter_keys.iter())
+                .filter(|(_, key)| key.contains(&query))
+                .map(|(package, _)| package)
+                .collect();
+            let len = matches.len();
+            let (_, _, start) = crate::package_ui::page_bounds(len, self.installed_page);
+            let rows = matches
+                .into_iter()
+                .skip(start)
+                .take(crate::package_ui::PAGE_SIZE)
                 .map(|package| {
                     let (description, repository, notes) =
                         package_detail_parts(package, &self.repositories);
@@ -890,21 +961,21 @@ impl StoreState {
                             .into(),
                     );
                     RowVm {
-                        title: package.name.clone(),
+                        // Same `name version` title as apk/flatpak.
+                        title: package.version.as_deref().map_or_else(
+                            || package.name.clone(),
+                            |version| format!("{} {version}", package.name),
+                        ),
                         description,
                         repository,
                         notes,
                         actions,
                     }
                 })
-                .collect()
+                .collect();
+            (len, rows)
         };
-        let query = self.installed_filter.trim().to_lowercase();
-        let rows: Vec<RowVm<'_>> = raw_rows
-            .into_iter()
-            .filter(|row| row.title.to_lowercase().contains(&query))
-            .collect();
-        let filtering = !query.is_empty();
+        let (page_count, page, _) = crate::package_ui::page_bounds(matched, self.installed_page);
         let empty_note = if rows.is_empty() {
             if filtering || showing_results {
                 Some(("No matches".to_string(), "No packages matched.".to_string()))
@@ -932,9 +1003,12 @@ impl StoreState {
             )
             .into()]
         };
-        let listed = rows.len();
+        let listed = matched;
         let list = ListVm {
-            browsing: self.list_browser,
+            page,
+            page_count,
+            page_previous: Message::StoreListPagePrevious,
+            page_next: Message::StoreListPageNext,
             browse: Message::StoreListBrowserOpen,
             filter: Some(crate::package_ui::FilterVm {
                 value: self.installed_filter.clone(),
@@ -980,32 +1054,82 @@ impl StoreState {
                 settings::item("No history", text("No profile generations reported.")).into(),
             );
         } else {
-            // One row per generation: the NUMBER is the item label.
-            let mut entries: Vec<(String, String)> = Vec::new();
-            for line in &self.generations {
-                if let Some(rest) = line.strip_prefix("Version ") {
-                    let (number, body) = match rest.split_once(' ') {
-                        Some((number, body)) => (number.to_string(), body.to_string()),
-                        None => (rest.to_string(), String::new()),
-                    };
-                    entries.push((number, body));
-                } else if let Some(last) = entries.last_mut() {
-                    last.1.push('\n');
-                    last.1.push_str(line);
-                } else {
-                    entries.push((String::new(), line.clone()));
+            // Zero-alloc boundary scan first: only the current
+            // page's strings are built (per-frame cost stays bounded).
+            let lines: Vec<&str> = self.generations.iter().map(String::as_str).collect();
+            let mut starts: Vec<usize> = Vec::new();
+            for (index, line) in lines.iter().enumerate() {
+                if line.starts_with("Version ") {
+                    starts.push(index);
                 }
             }
-            for (number, body) in entries {
+            // Entries: (header index or None, body range).
+            let mut entries: Vec<(Option<usize>, std::ops::Range<usize>)> = Vec::new();
+            match starts.first() {
+                None => {
+                    if !lines.is_empty() {
+                        entries.push((None, 0..lines.len()));
+                    }
+                }
+                Some(&first) => {
+                    if first > 0 {
+                        entries.push((None, 0..first));
+                    }
+                    for (position, &header) in starts.iter().enumerate() {
+                        let end = starts.get(position + 1).copied().unwrap_or(lines.len());
+                        entries.push((Some(header), header..end));
+                    }
+                }
+            }
+            let (page_count, page, _) =
+                crate::package_ui::page_bounds(entries.len(), self.generations_page);
+            if page_count > 1 {
+                generation_items.push(
+                    settings::item(
+                        "Pages",
+                        row(vec![
+                            button::text("Previous")
+                                .on_press_maybe(
+                                    (page > 0).then_some(Message::StoreGenerationsPagePrevious),
+                                )
+                                .into(),
+                            text(format!("{} of {}", page + 1, page_count)).into(),
+                            button::text("Next")
+                                .on_press_maybe(
+                                    (page + 1 < page_count)
+                                        .then_some(Message::StoreGenerationsPageNext),
+                                )
+                                .into(),
+                        ])
+                        .spacing(8),
+                    )
+                    .into(),
+                );
+            }
+            let start = page * crate::package_ui::PAGE_SIZE;
+            for (header, range) in entries
+                .iter()
+                .skip(start)
+                .take(crate::package_ui::PAGE_SIZE)
+            {
+                let (number, body_lines) = header
+                    .and_then(|index| {
+                        let line = lines.get(index)?;
+                        let rest = line.strip_prefix("Version ").unwrap_or_default();
+                        let number = rest.split(' ').next().unwrap_or(rest).to_string();
+                        let body = lines.get(range.start + 1..range.end)?;
+                        Some((number, body))
+                    })
+                    .unwrap_or_else(|| (String::new(), lines.get(range.clone()).unwrap_or(&[])));
                 let title = if number.is_empty() {
                     "History".to_string()
                 } else {
                     number
                 };
-                let body = if body.is_empty() {
+                let body = if body_lines.is_empty() {
                     "(no details)".to_string()
                 } else {
-                    body
+                    body_lines.join("\n")
                 };
                 generation_items.push(settings::item(title, text(body)).into());
             }
@@ -1061,7 +1185,6 @@ impl StoreState {
             pattern,
             list,
             generations,
-            generations_browsing: self.generations_browser,
             generations_browse: Message::StoreGenerationsBrowserOpen,
         }
     }
@@ -1471,6 +1594,8 @@ mod tests {
             active: true,
 
             description: None,
+
+            version: None,
         });
         state.generations.push("Version 3".into());
         state.set_target_user("bob".into());
