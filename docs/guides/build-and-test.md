@@ -130,14 +130,18 @@ podman run --rm --network=host -v "$PWD:/work" -w /work nixos/nix \
    audits workflow security.
 6. **version** resolves the workspace version and whether a package is due.
    **changes** supplies the PR package/nix path filters.
-7. **package** starts after `image`/`version`/`changes`, in parallel with the
-   test/lint/gui/analyzer/docs jobs. It builds release PAM `ursined` and the GUI,
-   runs the installer smoke tests, creates the tarball/checksum, and uploads
+7. **package** runs only on a release tag (or a forced
+   `workflow_dispatch` / a PR smoke when build inputs change) — branch
+   pushes never build artifacts. On a tag it starts after
+   `image`/`version`/`changes` (the check jobs are skipped by then).
+   It builds release PAM `ursined` and the GUI, runs the installer
+   smoke tests, creates the tarball/checksum, and uploads
    `ursine-release`. This path has no dependency cache on purpose.
-8. **publish** waits for `package`, `analyzer`, `docs` and `zizmor`; analyzer
-   and docs can finish while the release build runs, but nothing is published
-   until they pass. It publishes tag assets or the rolling `latest`, and
-   updates `nix/binary.nix` on tags.
+8. **publish** runs ONLY on tags. It waits for `package` (and tolerates the
+   check jobs being skipped there — `test`/`lint`/`gui`/`analyzer`/`docs`/
+   `zizmor` do not re-run on a tag: the push of the same commit already ran
+   them). It publishes the versioned tag assets and updates
+   `nix/binary.nix` on tags; branch pushes never publish.
 9. **flake** runs on PR/main only when `flake.nix`, `flake.lock`, or `nix/**`
    changed. It is not a dependency of `package`, so a tag does not try to
    fetch a not-yet-published artifact.

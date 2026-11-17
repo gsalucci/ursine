@@ -22,10 +22,10 @@ Everything that makes Ursine buildable, testable, releasable and packagable — 
    - `apk add rust cargo git nodejs` (+ `linux-pam-dev` on pam jobs)
    - `cargo test --workspace --no-default-features` / `--features pam` / `--features full`
    - gate: `cargo clippy --workspace --all-features -- -D warnings` + `cargo fmt --check`
-2. `version` gate: reads `Cargo.toml`; on a tag it must equal `v<version>`. The expensive `package` job runs only for a tag or a version without an existing tag; PRs run it only when build inputs change. Cargo registry and `artifacts/target` are cached with `actions/cache`.
+2. `version` gate: reads `Cargo.toml`; on a tag it must equal `v<version>`. The expensive `package` job runs only on a release tag (plus a manual `workflow_dispatch` with `force_package`, and PR smoke when build inputs change) — branch pushes never build artifacts. Cargo registry and `artifacts/target` are cached with `actions/cache`.
 3. `flake`: **container** `nixos/nix` → `nix flake check` + `nix build --out-link artifacts/result` on push/PR — builds the pinned binary package in seconds (out-link rule: nothing but source files ever appears at repo root)
-4. `package` job (alpine rust image) builds release binaries → versioned GitHub Release on tags, rolling `latest` prerelease on main. It is skipped when the workspace version is already tagged, unless a PR changes build inputs.
-5. `publish` verifies the published checksum, updates `nix/binary.nix` on main on tags, and attaches `ursine-flake-<tag>.tar.gz` (`flake.nix`, `flake.lock`, `nix/`, `README.md`). Flake consumption: `github:skea999/ursine` (pinned via `nix/binary.nix`).
+4. `package` job (alpine rust image) builds release binaries ONLY on a tag (or forced dispatch / PR smoke). Branch pushes skip it entirely: artifacts are never built or staged without a tag.
+5. `publish` runs ONLY on tags (`!cancelled()` so it survives the check jobs being skipped there): verifies the published checksum, updates `nix/binary.nix` on main, and attaches `ursine-flake-<tag>.tar.gz` (`flake.nix`, `flake.lock`, `nix/`, `README.md`). The check jobs (`test`/`lint`/`gui`/`analyzer`/`docs`/`zizmor`) are skipped on tags — they already ran on the push of the same commit. Flake consumption: `github:skea999/ursine` (pinned via `nix/binary.nix`).
 6. `verify-pin` re-runs `nix flake check` against main after a tag release, proving the auto-updated pin resolves.
 7. NO job installs rustup/cargo/nix on the host runner; actions that need node work because containers provide `nodejs` (alpine) or ship it (nix image)
 
