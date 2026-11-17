@@ -6,6 +6,15 @@
 See `state/session-state.json` for current goals, decisions, risks, and next actions.
 See `AGENTS.md` for project context and milestone history.
 
+## Session 2026-11-16 (d) — perf + modals everywhere, release 0.39.0 (main, tag `v0.39.0`)
+
+**Status**: Pushed through `126d630` (keyring hung again mid-session — user fixed auth, GIT_TRACE pinned `git-credential-libsecret get`); feature CI `44060327227` + tag CI `44063478538`/`44063478566` success; auto-pin `ae99888` pulled, HEAD `ae99888`.
+
+- **Perf (`ec5499a`)**: apk `parse_installed` O(n²)→linear (HashSet + `split_id`, no per-candidate `format!` — the UI freeze); zero-allocation filtering (`filter_keys` raw titles + `contains_ci`, NO lowercase anywhere — user asked to remove it; keys rebuilt on every source swap incl. the load_store blocker); pagination `PAGE_SIZE=50` + `page_bounds` for installed lists ×3 and nix generations (page-only string building); browser open button always visible (0.38.0 bug); nix rows show `name version` from the store path; `cargo clean` reclaimed133 GB (ENOSPC on link).
+- **Modals (`54a9b9b` + `ffc5312`)**: confirmations AND job output out of the page into `Application::dialog` — priority: session gate → package confirms → other-module confirms → job progress (same slot as the confirm: confirm → output in one window; Close only when done) → half-page browsers. `ConfirmVm.rows` became generic (label → widget) so the disks format/create/delete flows carry dropdowns/inputs/type-to-confirm INTO the dialog; inline blocks deleted in ALL12 remaining modules (apparmor, booster, crontab, disks, firewall, network forget+IPv4, printers, scanners, services, snapshots, theming, users delete); `confirm_row`/`pending_text` gone; zero `title("Confirm…")` in views.
+- Review closed (stale comments, CHANGELOG wording); gates green each step; rustdoc lesson (`cargo doc -D warnings` locally) applied pre-push.
+- User's earlier "actions blocked until Close" attributed to the old inline/modal-less flow (resolved by the modal work — user confirmed).
+
 ## Session 2026-11-16 (c) — half-page browsers, release 0.38.0 (main, tag `v0.38.0`)
 
 **Status**: Pushed through `f29d9d9`; feature CI `43932204543` + session-docs CI `43912341137` success; tag CI `43936042826`/`43936043200` success; auto-pin `e73433f` pulled, HEAD `e73433f`.

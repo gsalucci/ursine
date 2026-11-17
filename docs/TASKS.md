@@ -1,6 +1,6 @@
 # Tasks — Ursine
 
-**Milestone**: v0.38.0 — half-page browsers (2026-11-16)
+**Milestone**: v0.39.0 — perf + modals everywhere (2026-11-16)
 **Updated**: 2026-11-16
 **Workflow rule (binding)**: backend first, frontend immediately, same feature. No next feature until daemon + frontend reach parity.
 **UI rule (binding)**: patterns from cosmic-settings (structure), Webmin (action coverage), Cockpit (gating/status/confirmations).
