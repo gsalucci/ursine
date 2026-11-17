@@ -9,6 +9,7 @@ use cosmic::Element;
 use ursine_api::FirewallStatus;
 
 use crate::app::Message;
+use crate::package_ui::{text_row, ConfirmVm};
 
 #[derive(Default)]
 pub struct FirewallState {
@@ -86,36 +87,6 @@ impl FirewallState {
             .collect::<Vec<_>>();
         let selected = zones.iter().position(|zone| *zone == self.zone);
         let zones_for_zone = zones.clone();
-        if self.pending_disable {
-            items.push(
-                settings::section()
-                    .title("Confirm disable")
-                    .add(settings::item(
-                        "Consequences",
-                        text("Stop filtering on the default zone (target ACCEPT)? Traffic the firewall blocked will pass."),
-                    ))
-                    .add(settings::item(
-                        "Actions",
-                        row(vec![
-                            button::destructive("Disable filtering")
-                                .on_press_maybe(
-                                    (!self.action_busy)
-                                        .then_some(Message::FirewallEnabledConfirmed),
-                                )
-                                .into(),
-                            button::text("Cancel")
-                                .on_press_maybe(
-                                    (!self.action_busy)
-                                        .then_some(Message::FirewallEnabledCancelled),
-                                )
-                                .into(),
-                        ])
-                        .spacing(8),
-                    ))
-                    .into(),
-            );
-        }
-
         items.push(
             settings::section()
                 .title("Zone setup")
@@ -172,38 +143,6 @@ impl FirewallState {
                 ))
                 .into(),
         );
-
-        if let Some(name) = &self.pending_delete {
-            items.push(
-                settings::section()
-                    .title("Confirm delete")
-                    .add(settings::item(
-                        "Consequences",
-                        text(format!(
-                            "Delete the custom service definition {name}? Zones referencing it lose the service."
-                        )),
-                    ))
-                    .add(settings::item(
-                        "Actions",
-                        row(vec![
-                            button::destructive("Delete")
-                                .on_press_maybe(
-                                    (!self.action_busy)
-                                        .then_some(Message::FirewallDeleteConfirmed),
-                                )
-                                .into(),
-                            button::text("Cancel")
-                                .on_press_maybe(
-                                    (!self.action_busy)
-                                        .then_some(Message::FirewallDeleteCancelled),
-                                )
-                                .into(),
-                        ])
-                        .spacing(8),
-                    ))
-                    .into(),
-            );
-        }
 
         let mut custom = settings::section().title("Custom services");
         if status.custom_services.is_empty() {
@@ -286,5 +225,40 @@ impl FirewallState {
         }
 
         scrollable(column(items).spacing(16).padding(24)).into()
+    }
+}
+
+impl FirewallState {
+    /// Pending disable/delete confirmations as modal data.
+    pub(crate) fn pending_confirm(&self) -> Option<ConfirmVm<'_>> {
+        if self.pending_disable {
+            return Some(ConfirmVm {
+                title: "Confirm disable".to_string(),
+                rows: vec![(
+                    "Consequences".to_string(),
+                    text_row(
+                        "Stop filtering on the default zone (target ACCEPT)? Traffic the firewall blocked will pass.",
+                    ),
+                )],
+                confirm: Message::FirewallEnabledConfirmed,
+                cancel: Message::FirewallEnabledCancelled,
+                armed: !self.action_busy,
+                destructive: true,
+            });
+        }
+        let name = self.pending_delete.as_ref()?;
+        Some(ConfirmVm {
+            title: "Confirm delete".to_string(),
+            rows: vec![(
+                "Consequences".to_string(),
+                text_row(format!(
+                    "Delete the custom service definition {name}? Zones referencing it lose the service."
+                )),
+            )],
+            confirm: Message::FirewallDeleteConfirmed,
+            cancel: Message::FirewallDeleteCancelled,
+            armed: !self.action_busy,
+            destructive: true,
+        })
     }
 }

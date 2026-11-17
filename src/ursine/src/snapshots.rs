@@ -10,6 +10,7 @@ use ursine_api::{BtrbkConfigView, BtrbkSettings, Snapshot, SnapshotStats};
 
 use crate::app::Message;
 use crate::client::SnapshotPage;
+use crate::package_ui::{text_row, ConfirmVm};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnapSetting {
@@ -401,58 +402,43 @@ impl SnapshotsState {
                 .into(),
         );
 
-        if let Some((snapshot, target)) = &self.pending_restore {
-            items.push(
-                settings::section()
-                    .title("Confirm restore")
-                    .add(settings::item(
-                        "Consequences",
-                        text(format!("Restore {snapshot} to {target}? An existing target is moved to a timestamped backup path first.")),
-                    ))
-                    .add(settings::item(
-                        "Actions",
-                        row(vec![
-                            button::suggested("Confirm restore")
-                                .on_press_maybe((!self.action_busy).then_some(Message::SnapshotRestoreConfirmed))
-                                .into(),
-                            button::text("Cancel")
-                                .on_press(Message::SnapshotRestoreCancelled)
-                                .into(),
-                        ])
-                        .spacing(8),
-                    ))
-                    .into(),
-            );
-        }
-
-        if let Some(paths) = &self.pending_delete {
-            items.push(
-                settings::section()
-                    .title("Confirm snapshot removal")
-                    .add(settings::item(
-                        "Consequences",
-                        text(format!("Permanently delete {} snapshot(s)?", paths.len())),
-                    ))
-                    .add(settings::item("Paths", text(paths.join("\n"))))
-                    .add(settings::item(
-                        "Actions",
-                        row(vec![
-                            button::suggested("Confirm delete")
-                                .on_press_maybe(
-                                    (!self.action_busy).then_some(Message::SnapshotDeleteConfirmed),
-                                )
-                                .into(),
-                            button::text("Cancel")
-                                .on_press(Message::SnapshotDeleteCancelled)
-                                .into(),
-                        ])
-                        .spacing(8),
-                    ))
-                    .into(),
-            );
-        }
-
         scrollable(column(items).spacing(16).padding(24)).into()
+    }
+}
+
+impl SnapshotsState {
+    /// Pending restore/delete confirmations as modal data.
+    pub(crate) fn pending_confirm(&self) -> Option<ConfirmVm<'_>> {
+        if let Some((snapshot, target)) = &self.pending_restore {
+            return Some(ConfirmVm {
+                title: "Confirm restore".to_string(),
+                rows: vec![(
+                    "Consequences".to_string(),
+                    text_row(format!(
+                        "Restore {snapshot} to {target}? An existing target is moved to a timestamped backup path first."
+                    )),
+                )],
+                confirm: Message::SnapshotRestoreConfirmed,
+                cancel: Message::SnapshotRestoreCancelled,
+                armed: !self.action_busy,
+                destructive: false,
+            });
+        }
+        let paths = self.pending_delete.as_ref()?;
+        Some(ConfirmVm {
+            title: "Confirm snapshot removal".to_string(),
+            rows: vec![
+                (
+                    "Consequences".to_string(),
+                    text_row(format!("Permanently delete {} snapshot(s)?", paths.len())),
+                ),
+                ("Paths".to_string(), text_row(paths.join("\n"))),
+            ],
+            confirm: Message::SnapshotDeleteConfirmed,
+            cancel: Message::SnapshotDeleteCancelled,
+            armed: !self.action_busy,
+            destructive: false,
+        })
     }
 }
 

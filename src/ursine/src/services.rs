@@ -7,6 +7,7 @@ use cosmic::Element;
 use ursine_api::{Service, ServiceOp};
 
 use crate::app::Message;
+use crate::package_ui::{text_row, ConfirmVm};
 
 #[derive(Default)]
 pub struct ServicesState {
@@ -104,32 +105,24 @@ impl ServicesState {
         }
         items.push(list.into());
 
-        if let Some((name, op)) = &self.pending {
-            items.push(
-                settings::section()
-                    .title(format!("Confirm {op:?}"))
-                    .add(settings::item(
-                        "Consequences",
-                        text(format!("Apply {op:?} to service {name}?")),
-                    ))
-                    .add(settings::item(
-                        "Actions",
-                        row(vec![
-                            button::destructive("Confirm")
-                                .on_press_maybe(
-                                    (!self.action_busy).then_some(Message::ServiceConfirmed),
-                                )
-                                .into(),
-                            button::text("Cancel")
-                                .on_press(Message::ServiceCancelled)
-                                .into(),
-                        ])
-                        .spacing(8),
-                    ))
-                    .into(),
-            );
-        }
-
         scrollable(column(items).spacing(16).padding(24)).into()
+    }
+}
+
+impl ServicesState {
+    /// Pending service-operation confirmation as modal data.
+    pub(crate) fn pending_confirm(&self) -> Option<ConfirmVm<'_>> {
+        let (name, op) = self.pending.as_ref()?;
+        Some(ConfirmVm {
+            title: format!("Confirm {op:?}"),
+            rows: vec![(
+                "Consequences".to_string(),
+                text_row(format!("Apply {op:?} to service {name}?")),
+            )],
+            confirm: Message::ServiceConfirmed,
+            cancel: Message::ServiceCancelled,
+            armed: !self.action_busy,
+            destructive: true,
+        })
     }
 }

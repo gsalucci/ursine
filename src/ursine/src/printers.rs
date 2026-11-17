@@ -7,6 +7,7 @@ use cosmic::Element;
 use ursine_api::{PrintJob, Printer};
 
 use crate::app::Message;
+use crate::package_ui::{text_row, ConfirmVm};
 
 #[derive(Default)]
 pub struct PrintersState {
@@ -211,60 +212,6 @@ impl PrintersState {
         ));
         items.push(jobs.into());
 
-        if let Some(name) = &self.pending_remove {
-            items.push(
-                settings::section()
-                    .title("Confirm printer removal")
-                    .add(settings::item(
-                        "Consequences",
-                        text(format!(
-                            "Remove printer {name}? Queued jobs are not cancelled."
-                        )),
-                    ))
-                    .add(settings::item(
-                        "Actions",
-                        row(vec![
-                            button::destructive("Remove")
-                                .on_press_maybe(
-                                    (!self.action_busy).then_some(Message::PrinterRemoveConfirmed),
-                                )
-                                .into(),
-                            button::text("Cancel")
-                                .on_press(Message::PrinterRemoveCancelled)
-                                .into(),
-                        ])
-                        .spacing(8),
-                    ))
-                    .into(),
-            );
-        }
-
-        if self.pending_cancel {
-            items.push(
-                settings::section()
-                    .title("Confirm cancel all jobs")
-                    .add(settings::item(
-                        "Consequences",
-                        text("Cancel every queued print job on this system?"),
-                    ))
-                    .add(settings::item(
-                        "Actions",
-                        row(vec![
-                            button::destructive("Cancel jobs")
-                                .on_press_maybe(
-                                    (!self.action_busy).then_some(Message::PrinterCancelConfirmed),
-                                )
-                                .into(),
-                            button::text("Back")
-                                .on_press(Message::PrinterCancelCancelled)
-                                .into(),
-                        ])
-                        .spacing(8),
-                    ))
-                    .into(),
-            );
-        }
-
         scrollable(column(items).spacing(16).padding(24)).into()
     }
 }
@@ -287,5 +234,37 @@ impl JobDetail for PrintJob {
                 .map(|size| format!(" · {size}"))
                 .unwrap_or_default()
         )
+    }
+}
+
+impl PrintersState {
+    /// Pending remove/cancel-all confirmations as modal data.
+    pub(crate) fn pending_confirm(&self) -> Option<ConfirmVm<'_>> {
+        if let Some(name) = &self.pending_remove {
+            return Some(ConfirmVm {
+                title: "Confirm printer removal".to_string(),
+                rows: vec![(
+                    "Consequences".to_string(),
+                    text_row(format!(
+                        "Remove printer {name}? Queued jobs are not cancelled."
+                    )),
+                )],
+                confirm: Message::PrinterRemoveConfirmed,
+                cancel: Message::PrinterRemoveCancelled,
+                armed: !self.action_busy,
+                destructive: true,
+            });
+        }
+        self.pending_cancel.then(|| ConfirmVm {
+            title: "Confirm cancel all jobs".to_string(),
+            rows: vec![(
+                "Consequences".to_string(),
+                text_row("Cancel every queued print job on this system?"),
+            )],
+            confirm: Message::PrinterCancelConfirmed,
+            cancel: Message::PrinterCancelCancelled,
+            armed: !self.action_busy,
+            destructive: true,
+        })
     }
 }

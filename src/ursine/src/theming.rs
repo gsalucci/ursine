@@ -8,6 +8,7 @@ use cosmic::Element;
 use ursine_api::{ThemeApplyReport, ThemeSnapshot, ThemingStatus};
 
 use crate::app::Message;
+use crate::package_ui::{text_row, ConfirmVm};
 
 #[derive(Default)]
 pub struct ThemingState {
@@ -98,29 +99,7 @@ impl ThemingState {
             )
             .into(),
         );
-        if self.confirm_apply {
-            let targets = status.targets.iter().filter(|t| t.available).count();
-            items.push(
-                text(format!(
-                    "Write the theme to {targets} targets in your home? Some changes apply after you restart apps or the session."
-                ))
-                .into(),
-            );
-            items.push(
-                row(vec![
-                    button::suggested("Confirm apply")
-                        .on_press_maybe(
-                            (!self.apply_busy).then_some(Message::ThemingApplyConfirmed),
-                        )
-                        .into(),
-                    button::text("Cancel")
-                        .on_press(Message::ThemingApplyCancelled)
-                        .into(),
-                ])
-                .spacing(8)
-                .into(),
-            );
-        } else {
+        if !self.confirm_apply {
             items.push(
                 button::suggested("Apply theme everywhere")
                     .on_press_maybe(
@@ -266,6 +245,25 @@ fn parse_hex_color(hex: &str) -> cosmic::iced::Color {
         g: channel(2),
         b: channel(4),
         a: alpha,
+    }
+}
+
+impl ThemingState {
+    /// Pending apply confirmation as modal data.
+    pub(crate) fn pending_confirm(&self) -> Option<ConfirmVm<'_>> {
+        self.confirm_apply.then(|| ConfirmVm {
+            title: "Confirm apply".to_string(),
+            rows: vec![(
+                "Consequences".to_string(),
+                text_row(
+                    "Write the theme to the available targets in your home? Some changes apply after you restart apps or the session.",
+                ),
+            )],
+            confirm: Message::ThemingApplyConfirmed,
+            cancel: Message::ThemingApplyCancelled,
+            armed: !self.apply_busy,
+            destructive: false,
+        })
     }
 }
 

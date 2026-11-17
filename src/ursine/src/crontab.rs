@@ -8,6 +8,7 @@ use cosmic::widget::{button, column, row, scrollable, text};
 use cosmic::Element;
 
 use crate::app::Message;
+use crate::package_ui::{text_row, ConfirmVm};
 
 #[derive(Debug)]
 pub struct CrontabState {
@@ -85,27 +86,7 @@ impl CrontabState {
                 .into(),
         );
 
-        if self.confirm {
-            items.push(
-                text("Replace the crontab with the editor content? An empty body clears it.")
-                    .into(),
-            );
-            items.push(
-                row(vec![
-                    button::suggested("Confirm save")
-                        .on_press_maybe(
-                            (!self.action_busy && !self.busy)
-                                .then_some(Message::CrontabSaveConfirmed),
-                        )
-                        .into(),
-                    button::text("Cancel")
-                        .on_press(Message::CrontabSaveCancelled)
-                        .into(),
-                ])
-                .spacing(8)
-                .into(),
-            );
-        } else {
+        if !self.confirm {
             items.push(
                 button::suggested("Save crontab")
                     .on_press_maybe(
@@ -120,6 +101,23 @@ impl CrontabState {
         }
 
         scrollable(column(items).spacing(16).padding(24)).into()
+    }
+}
+
+impl CrontabState {
+    /// Pending save confirmation as modal data.
+    pub(crate) fn pending_confirm(&self) -> Option<ConfirmVm<'_>> {
+        self.confirm.then(|| ConfirmVm {
+            title: "Confirm save".to_string(),
+            rows: vec![(
+                "Consequences".to_string(),
+                text_row("Replace the crontab with the editor content? An empty body clears it."),
+            )],
+            confirm: Message::CrontabSaveConfirmed,
+            cancel: Message::CrontabSaveCancelled,
+            armed: !self.action_busy && !self.busy,
+            destructive: false,
+        })
     }
 }
 

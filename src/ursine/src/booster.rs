@@ -9,6 +9,7 @@ use cosmic::Element;
 use ursine_api::{BoosterConfig, BoosterConfigPatch};
 
 use crate::app::Message;
+use crate::package_ui::{text_row, ConfirmVm};
 
 /// One editable key: wire name (also the `clear` entry) + label.
 const FIELDS: &[(&str, &str)] = &[
@@ -191,27 +192,7 @@ impl BoosterState {
             items.push(field_row(key, self.value(key).to_string()));
         }
 
-        if self.save_confirm {
-            items.push(text(
-                "Write /etc/booster.yaml? The current file rotates into the backup slots first.",
-            )
-            .into());
-            items.push(
-                row(vec![
-                    button::suggested("Confirm save")
-                        .on_press_maybe(
-                            (!self.action_busy && !self.busy)
-                                .then_some(Message::BoosterSaveConfirmed),
-                        )
-                        .into(),
-                    button::text("Cancel")
-                        .on_press(Message::BoosterSaveCancelled)
-                        .into(),
-                ])
-                .spacing(8)
-                .into(),
-            );
-        } else {
+        if !self.save_confirm {
             items.push(
                 button::suggested("Save config")
                     .on_press_maybe(
@@ -222,34 +203,7 @@ impl BoosterState {
         }
 
         items.push(text::title3("Regenerate initramfs").into());
-        if self.regen_confirm {
-            items.push(
-                text(format!(
-                    "Rebuild the initramfs now? Step: {}.",
-                    if self.regenerate_step.is_empty() {
-                        "booster build"
-                    } else {
-                        &self.regenerate_step
-                    }
-                ))
-                .into(),
-            );
-            items.push(
-                row(vec![
-                    button::suggested("Confirm regenerate")
-                        .on_press_maybe(
-                            (!self.action_busy && !self.busy)
-                                .then_some(Message::BoosterRegenConfirmed),
-                        )
-                        .into(),
-                    button::text("Cancel")
-                        .on_press(Message::BoosterRegenCancelled)
-                        .into(),
-                ])
-                .spacing(8)
-                .into(),
-            );
-        } else {
+        if !self.regen_confirm {
             items.push(
                 button::suggested("Regenerate")
                     .on_press_maybe(
@@ -326,6 +280,46 @@ fn patch_field_mut<'a>(patch: &'a mut BoosterConfigPatch, key: &str) -> &'a mut 
         "network.interfaces" => &mut patch.network_interfaces,
         // FIELDS only contains the keys above.
         _ => unreachable!("unknown booster field key"),
+    }
+}
+
+impl BoosterState {
+    /// Pending save/regenerate confirmations as modal data.
+    pub(crate) fn pending_confirm(&self) -> Option<ConfirmVm<'_>> {
+        if self.save_confirm {
+            return Some(ConfirmVm {
+                title: "Confirm save".to_string(),
+                rows: vec![(
+                    "Consequences".to_string(),
+                    text_row(
+                        "Write /etc/booster.yaml? The current file rotates into the backup slots first.",
+                    ),
+                )],
+                confirm: Message::BoosterSaveConfirmed,
+                cancel: Message::BoosterSaveCancelled,
+                armed: !self.action_busy && !self.busy,
+                destructive: false,
+            });
+        }
+        if self.regen_confirm {
+            let step = if self.regenerate_step.is_empty() {
+                "booster build"
+            } else {
+                &self.regenerate_step
+            };
+            return Some(ConfirmVm {
+                title: "Confirm regenerate".to_string(),
+                rows: vec![(
+                    "Consequences".to_string(),
+                    text_row(format!("Rebuild the initramfs now? Step: {step}.")),
+                )],
+                confirm: Message::BoosterRegenConfirmed,
+                cancel: Message::BoosterRegenCancelled,
+                armed: !self.action_busy && !self.busy,
+                destructive: false,
+            });
+        }
+        None
     }
 }
 

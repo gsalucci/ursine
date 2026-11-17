@@ -9,6 +9,7 @@ use cosmic::Element;
 use ursine_api::ScannerConfigView;
 
 use crate::app::Message;
+use crate::package_ui::{text_row, ConfirmVm};
 
 #[derive(Default)]
 pub struct ScannersState {
@@ -136,32 +137,24 @@ impl ScannersState {
             );
         }
 
-        if let Some(name) = &self.pending_remove {
-            items.push(
-                settings::section()
-                    .title("Confirm scanner removal")
-                    .add(settings::item(
-                        "Consequences",
-                        text(format!("Remove manual airscan device {name}?")),
-                    ))
-                    .add(settings::item(
-                        "Actions",
-                        row(vec![
-                            button::destructive("Remove")
-                                .on_press_maybe(
-                                    (!self.action_busy).then_some(Message::ScannerRemoveConfirmed),
-                                )
-                                .into(),
-                            button::text("Cancel")
-                                .on_press(Message::ScannerRemoveCancelled)
-                                .into(),
-                        ])
-                        .spacing(8),
-                    ))
-                    .into(),
-            );
-        }
-
         scrollable(column(items).spacing(16).padding(24)).into()
+    }
+}
+
+impl ScannersState {
+    /// Pending removal confirmation as modal data.
+    pub(crate) fn pending_confirm(&self) -> Option<ConfirmVm<'_>> {
+        let name = self.pending_remove.as_ref()?;
+        Some(ConfirmVm {
+            title: "Confirm scanner removal".to_string(),
+            rows: vec![(
+                "Consequences".to_string(),
+                text_row(format!("Remove manual airscan device {name}?")),
+            )],
+            confirm: Message::ScannerRemoveConfirmed,
+            cancel: Message::ScannerRemoveCancelled,
+            armed: !self.action_busy,
+            destructive: true,
+        })
     }
 }

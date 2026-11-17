@@ -9,6 +9,7 @@ use cosmic::Element;
 use ursine_api::NetworkView;
 
 use crate::app::Message;
+use crate::package_ui::{text_row, ConfirmVm};
 
 /// Indices of [`Message::NetworkIpv4Field`].
 pub const IPV4_FIELD_ADDRESSES: u8 = 0;
@@ -146,38 +147,6 @@ impl NetworkState {
             }
             items.push(wifi.into());
 
-            if let Some(pending) = &self.pending_forget {
-                items.push(
-                    settings::section()
-                        .title("Confirm forget")
-                        .add(settings::item(
-                            "Consequences",
-                            text(format!(
-                                "Forget {pending}? The saved profile (including its Wi-Fi password) is deleted."
-                            )),
-                        ))
-                        .add(settings::item(
-                            "Actions",
-                            row(vec![
-                                button::destructive("Forget")
-                                    .on_press_maybe(
-                                        (!self.action_busy)
-                                            .then_some(Message::NetworkForgetConfirmed),
-                                    )
-                                    .into(),
-                                button::text("Cancel")
-                                    .on_press_maybe(
-                                        (!self.action_busy)
-                                            .then_some(Message::NetworkForgetCancelled),
-                                    )
-                                    .into(),
-                            ])
-                            .spacing(8),
-                        ))
-                        .into(),
-                );
-            }
-
             let mut vpns = settings::section().title("VPN");
             let vpn_profiles: Vec<_> = view
                 .profiles
@@ -258,34 +227,17 @@ impl NetworkState {
                                 .on_input(|value| Message::NetworkIpv4Field(IPV4_FIELD_DNS, value)),
                         ));
                 }
-                let actions = if form.confirm {
-                    row(vec![
-                        text("Apply now? An active connection reconnects.").into(),
-                        button::destructive("Confirm")
-                            .on_press_maybe(
-                                (!self.action_busy).then_some(Message::NetworkIpv4Apply),
-                            )
-                            .into(),
-                        button::text("Back")
-                            .on_press(Message::NetworkIpv4Cancelled)
-                            .into(),
-                    ])
-                    .spacing(8)
-                } else {
-                    row(vec![
-                        button::text("Apply…")
-                            .on_press_maybe(
-                                (!self.action_busy).then_some(Message::NetworkIpv4Apply),
-                            )
-                            .into(),
-                        button::text("Cancel")
-                            .on_press_maybe(
-                                (!self.action_busy).then_some(Message::NetworkIpv4Cancelled),
-                            )
-                            .into(),
-                    ])
-                    .spacing(8)
-                };
+                let actions = row(vec![
+                    button::text("Apply…")
+                        .on_press_maybe((!self.action_busy).then_some(Message::NetworkIpv4Apply))
+                        .into(),
+                    button::text("Cancel")
+                        .on_press_maybe(
+                            (!self.action_busy).then_some(Message::NetworkIpv4Cancelled),
+                        )
+                        .into(),
+                ])
+                .spacing(8);
                 items.push(section.add(settings::item("Actions", actions)).into());
             }
 
@@ -356,6 +308,42 @@ impl NetworkState {
         }
 
         scrollable(column(items).spacing(16).padding(24)).into()
+    }
+}
+
+impl NetworkState {
+    /// Pending forget/IPv4-apply confirmations as modal data.
+    pub(crate) fn pending_confirm(&self) -> Option<ConfirmVm<'_>> {
+        if let Some(pending) = &self.pending_forget {
+            return Some(ConfirmVm {
+                title: "Confirm forget".to_string(),
+                rows: vec![(
+                    "Consequences".to_string(),
+                    text_row(format!(
+                        "Forget {pending}? The saved profile (including its Wi-Fi password) is deleted."
+                    )),
+                )],
+                confirm: Message::NetworkForgetConfirmed,
+                cancel: Message::NetworkForgetCancelled,
+                armed: !self.action_busy,
+                destructive: true,
+            });
+        }
+        let form = self.ipv4.as_ref()?;
+        if !form.confirm {
+            return None;
+        }
+        Some(ConfirmVm {
+            title: "Confirm apply".to_string(),
+            rows: vec![(
+                "Consequences".to_string(),
+                text_row("Apply now? An active connection reconnects."),
+            )],
+            confirm: Message::NetworkIpv4Apply,
+            cancel: Message::NetworkIpv4Cancelled,
+            armed: !self.action_busy,
+            destructive: true,
+        })
     }
 }
 

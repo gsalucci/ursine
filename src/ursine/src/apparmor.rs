@@ -10,6 +10,7 @@ use cosmic::Element;
 use ursine_api::{ApparmorCheck, ApparmorProfileFile, ApparmorView};
 
 use crate::app::Message;
+use crate::package_ui::{text_row, ConfirmVm};
 
 /// A confirmed mutation (drives the confirm blocks and the daemon call).
 #[derive(Debug, Clone)]
@@ -227,10 +228,7 @@ impl ApparmorState {
             ))
             .into(),
         );
-        if matches!(&self.pending, Some(ApparmorOp::NotificationsEnable)) {
-            items.push(text(self.pending_text()).into());
-            items.push(confirm_row(!self.action_busy));
-        } else if !notif_ready {
+        if !notif_ready {
             // No on_press when the tool is missing: an unbound button
             // renders disabled.
             let button = if view.aa_notify_present {
@@ -458,13 +456,6 @@ impl ApparmorState {
             .into(),
         );
 
-        // ---- confirm block for a pending mutation ----
-        if let Some(pending) = &self.pending {
-            items.push(text::title3("Confirm").into());
-            items.push(text(pending.confirm_text()).into());
-            items.push(confirm_row(!self.action_busy));
-        }
-
         // ---- output box ----
         if let Some((label, output)) = &self.output {
             items.push(text::title3(label.clone()).into());
@@ -497,7 +488,7 @@ impl ApparmorState {
                 .into(),
         );
         if let Some(ApparmorOp::Save { .. }) = &self.pending {
-            // confirm block already rendered above
+            // The confirmation lives in the modal (pending_confirm).
         } else {
             items.push(
                 button::suggested("Save")
@@ -518,13 +509,6 @@ impl ApparmorState {
 
         scrollable(column(items).spacing(16).padding(24)).into()
     }
-
-    fn pending_text(&self) -> String {
-        self.pending
-            .as_ref()
-            .map(ApparmorOp::confirm_text)
-            .unwrap_or_default()
-    }
 }
 
 fn non_empty(value: &str) -> Option<String> {
@@ -532,17 +516,19 @@ fn non_empty(value: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
-fn confirm_row(armed: bool) -> Element<'static, Message> {
-    row(vec![
-        button::suggested("Confirm")
-            .on_press_maybe(armed.then_some(Message::ApparmorOpConfirmed))
-            .into(),
-        button::text("Cancel")
-            .on_press(Message::ApparmorOpCancelled)
-            .into(),
-    ])
-    .spacing(8)
-    .into()
+impl ApparmorState {
+    /// Pending mutation as modal data (rendered by `Application::dialog`).
+    pub(crate) fn pending_confirm(&self) -> Option<ConfirmVm<'_>> {
+        let pending = self.pending.as_ref()?;
+        Some(ConfirmVm {
+            title: "Confirm".to_string(),
+            rows: vec![("Action".to_string(), text_row(pending.confirm_text()))],
+            confirm: Message::ApparmorOpConfirmed,
+            cancel: Message::ApparmorOpCancelled,
+            armed: !self.action_busy,
+            destructive: false,
+        })
+    }
 }
 
 fn mode_button(

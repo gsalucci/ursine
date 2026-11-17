@@ -60,14 +60,20 @@ pub struct RefreshVm {
 
 /// A pending confirmation. ALL confirms render in the modal built by
 /// [`confirm_dialog`] (never on the page) — same shape everywhere.
-pub struct ConfirmVm {
+pub struct ConfirmVm<'a> {
     pub title: String,
-    /// Context rows shown above the buttons, e.g. ("Consequences", …).
-    pub rows: Vec<(String, String)>,
+    /// Context rows shown above the buttons: label → content (text,
+    /// input, dropdown — whatever the flow needs).
+    pub rows: Vec<(String, Element<'a, Message>)>,
     pub confirm: Message,
     pub cancel: Message,
     pub armed: bool,
     pub destructive: bool,
+}
+
+/// One copyable text row for a confirmation (`selectable_text`).
+pub fn text_row(value: impl Into<String>) -> Element<'static, Message> {
+    selectable_text(value.into()).into()
 }
 
 /// Upgrade section data: the "Upgrade all" row FIRST (apk order),
@@ -161,7 +167,7 @@ pub struct PackageVm<'a> {
     pub message: Option<&'a str>,
     /// Pending confirmations — rendered in the confirm modal, stacked
     /// in adapter order.
-    pub confirms: Vec<ConfirmVm>,
+    pub confirms: Vec<ConfirmVm<'a>>,
     pub scope: SectionVm<'a>,
     pub maintenance: Option<SectionVm<'a>>,
     pub upgrade: UpgradeVm<'a>,
@@ -327,11 +333,10 @@ fn status_items(error: Option<&str>, message: Option<&str>) -> Vec<Element<'stat
 
 /// One pending confirmation: context rows + Confirm/Cancel. Every
 /// manager's confirm renders here — titles and rows are data.
-fn confirm_block(vm: ConfirmVm) -> Element<'static, Message> {
+fn confirm_block(vm: ConfirmVm<'_>) -> Element<'_, Message> {
     let mut section = settings::section().title(vm.title);
     for (label, value) in vm.rows {
-        // Values stay copyable (errors and questions get pasted back).
-        section = section.add(settings::item(label, selectable_text(value)));
+        section = section.add(settings::item(label, value));
     }
     let confirm_button: Element<'static, Message> = if vm.destructive {
         button::destructive("Confirm")
@@ -667,12 +672,12 @@ fn browser_dialog(
 /// All pending confirmations of the active manager in ONE modal —
 /// never inline, never at the page top (user decision). A single
 /// confirmation keeps its own title; stacked ones share "Confirm".
-pub fn confirm_dialog(confirms: Vec<ConfirmVm>) -> Element<'static, Message> {
+pub fn confirm_dialog(confirms: Vec<ConfirmVm<'_>>) -> Element<'_, Message> {
     let title = confirms
         .first()
         .filter(|_| confirms.len() == 1)
         .map_or_else(|| "Confirm".to_string(), |confirm| confirm.title.clone());
-    let blocks: Vec<Element<'static, Message>> = confirms.into_iter().map(confirm_block).collect();
+    let blocks: Vec<Element<'_, Message>> = confirms.into_iter().map(confirm_block).collect();
     dialog()
         .title(title)
         .control(column(blocks).spacing(12))

@@ -581,7 +581,7 @@ impl StoreState {
         let enabled = self.scope_ready();
 
         // --- pending confirmations (stacked in the confirm modal) ---
-        let mut confirms: Vec<ConfirmVm> = Vec::new();
+        let mut confirms: Vec<ConfirmVm<'_>> = Vec::new();
         if let Some(pending) = &self.pending {
             let label = pending
                 .action
@@ -595,9 +595,9 @@ impl StoreState {
                 rows: vec![
                     (
                         "Target".to_string(),
-                        pending.action.target_label(&pending.scope),
+                        crate::package_ui::text_row(pending.action.target_label(&pending.scope)),
                     ),
-                    ("Action".to_string(), label),
+                    ("Action".to_string(), crate::package_ui::text_row(label)),
                 ],
                 confirm: Message::StoreActionConfirmed,
                 cancel: Message::StoreConfirmCancelled,
@@ -613,7 +613,10 @@ impl StoreState {
             };
             confirms.push(ConfirmVm {
                 title: "Confirm repository removal".to_string(),
-                rows: vec![("Consequences".to_string(), question)],
+                rows: vec![(
+                    "Consequences".to_string(),
+                    crate::package_ui::text_row(question),
+                )],
                 confirm: Message::StoreRepoRemoveConfirmed,
                 cancel: Message::StoreRepoRemoveCancelled,
                 armed: enabled && !self.action_busy && !self.search_busy,

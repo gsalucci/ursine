@@ -296,8 +296,8 @@ impl PackagesState {
         updates_auto: ursine_api::UpdatesAuto,
     ) -> crate::package_ui::PackageVm<'_> {
         use crate::package_ui::{
-            page_bounds, ConfirmVm, FilterVm, ListVm, PackageVm, RefreshVm, RowVm, SearchVm,
-            SectionVm, UpgradeAllVm, UpgradeVm, PAGE_SIZE,
+            page_bounds, text_row, ConfirmVm, FilterVm, ListVm, PackageVm, RefreshVm, RowVm,
+            SearchVm, SectionVm, UpgradeAllVm, UpgradeVm, PAGE_SIZE,
         };
 
         let manager = match kind {
@@ -306,13 +306,15 @@ impl PackagesState {
         };
 
         // --- pending confirmations (stacked in the confirm modal) ---
-        let mut confirms: Vec<ConfirmVm> = Vec::new();
+        let mut confirms: Vec<ConfirmVm<'_>> = Vec::new();
         if let Some((op, pattern)) = &self.pending_pattern {
             confirms.push(ConfirmVm {
                 title: "Confirm action".to_string(),
                 rows: vec![(
                     kind.title().to_string(),
-                    format!("{op} every installed package matching \"{pattern}\"?"),
+                    text_row(format!(
+                        "{op} every installed package matching \"{pattern}\"?"
+                    )),
                 )],
                 confirm: Message::PackagePatternConfirmed,
                 cancel: Message::PackagePatternCancelled,
@@ -325,9 +327,9 @@ impl PackagesState {
                 title: "Confirm repository removal".to_string(),
                 rows: vec![(
                     "Consequences".to_string(),
-                    format!(
+                    text_row(format!(
                         "Remove {url} from /etc/apk/repositories? Indexes refresh after the change."
-                    ),
+                    )),
                 )],
                 confirm: Message::PackageApkRepoRemoveConfirmed,
                 cancel: Message::PackageApkRepoRemoveCancelled,
@@ -340,9 +342,9 @@ impl PackagesState {
                 title: "Confirm repository removal".to_string(),
                 rows: vec![(
                     "Consequences".to_string(),
-                    format!(
+                    text_row(format!(
                         "Remove the repository {name}? Packages from it stop receiving updates."
-                    ),
+                    )),
                 )],
                 confirm: Message::FlatpakRemoteRemoveConfirmed,
                 cancel: Message::FlatpakRemoteRemoveCancelled,
@@ -352,45 +354,48 @@ impl PackagesState {
         }
         if let Some(pending) = &self.pending_install {
             let mut rows = vec![
-                ("Application".to_string(), pending.app_id.clone()),
+                ("Application".to_string(), text_row(pending.app_id.clone())),
                 (
                     "Repository".to_string(),
-                    if self.install_remote.is_empty() {
+                    text_row(if self.install_remote.is_empty() {
                         "flathub".to_string()
                     } else {
                         self.install_remote.clone()
-                    },
+                    }),
                 ),
             ];
             match (&pending.info, &pending.info_error) {
                 (Some(info), _) => {
                     rows.push((
                         "Version".to_string(),
-                        if info.version.is_empty() {
+                        text_row(if info.version.is_empty() {
                             "unknown".to_string()
                         } else {
                             info.version.clone()
-                        },
+                        }),
                     ));
                     rows.push((
                         "Download size".to_string(),
-                        if info.download_size.is_empty() {
+                        text_row(if info.download_size.is_empty() {
                             "unknown".to_string()
                         } else {
                             info.download_size.clone()
-                        },
+                        }),
                     ));
                     rows.push((
                         "Installed size".to_string(),
-                        if info.installed_size.is_empty() {
+                        text_row(if info.installed_size.is_empty() {
                             "unknown".to_string()
                         } else {
                             info.installed_size.clone()
-                        },
+                        }),
                     ));
                 }
                 (_, Some(error)) => {
-                    rows.push(("Sizes".to_string(), format!("unavailable ({error})")));
+                    rows.push((
+                        "Sizes".to_string(),
+                        text_row(format!("unavailable ({error})")),
+                    ));
                 }
                 _ => {}
             }
@@ -408,7 +413,7 @@ impl PackagesState {
                 title: "Confirm removal".to_string(),
                 rows: vec![(
                     "Consequences".to_string(),
-                    format!("Remove {name} from {}?", kind.title()),
+                    text_row(format!("Remove {name} from {}?", kind.title())),
                 )],
                 confirm: Message::PackageRemoveConfirmed,
                 cancel: Message::PackageRemoveCancelled,
@@ -421,7 +426,7 @@ impl PackagesState {
                 title: "Confirm orphan removal".to_string(),
                 rows: vec![(
                     "Consequences".to_string(),
-                    "Remove unused Flatpak runtimes in this installation?".to_string(),
+                    text_row("Remove unused Flatpak runtimes in this installation?"),
                 )],
                 confirm: Message::PackageOrphansConfirmed,
                 cancel: Message::PackageOrphansCancelled,
@@ -434,7 +439,7 @@ impl PackagesState {
                 title: "Confirm update".to_string(),
                 rows: vec![(
                     "Consequences".to_string(),
-                    format!("Update every {} package?", kind.title()),
+                    text_row(format!("Update every {} package?", kind.title())),
                 )],
                 confirm: Message::PackageUpdateConfirmed,
                 cancel: Message::PackageUpdateCancelled,

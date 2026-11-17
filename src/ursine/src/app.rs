@@ -2106,6 +2106,24 @@ impl cosmic::Application for App {
         if !confirms.is_empty() {
             return Some(crate::package_ui::confirm_dialog(confirms));
         }
+        // 1b) Confirmations of every other module (same modal).
+        let other = self
+            .apparmor
+            .pending_confirm()
+            .or_else(|| self.booster.pending_confirm())
+            .or_else(|| self.crontab.pending_confirm())
+            .or_else(|| self.disks.pending_confirm())
+            .or_else(|| self.firewall.pending_confirm())
+            .or_else(|| self.network.pending_confirm())
+            .or_else(|| self.printers.pending_confirm())
+            .or_else(|| self.scanners.pending_confirm())
+            .or_else(|| self.services.pending_confirm())
+            .or_else(|| self.snapshots.pending_confirm())
+            .or_else(|| self.theming.pending_confirm())
+            .or_else(|| self.users.pending_confirm());
+        if let Some(confirm) = other {
+            return Some(crate::package_ui::confirm_dialog(vec![confirm]));
+        }
         // 2) A running job: same modal slot, now showing the output
         //    (Close appears inside once the job finishes).
         if let Some(job) = &self.job {

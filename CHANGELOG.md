@@ -23,6 +23,11 @@
   confirm blocks or the terminal panel anymore; browsers keep their
   lower priority. Close on the progress dialog still appears only
   when the job finishes (unchanged package-progress rule).
+  This covers ALL modules, not just the package managers: apparmor,
+  booster, crontab, disks (format/create/delete flows carry their
+  inputs and type-to-confirm field into the dialog), firewall,
+  network (forget + IPv4 apply), printers, scanners, services,
+  snapshots, theming and users delete.
 - **Pagination everywhere it matters** (user decision): installed
   lists (all three managers) and nix generations render 50 rows per
   page (`Previous / Page N of M / Next` in the browser dialog);

@@ -7,6 +7,7 @@ use cosmic::Element;
 use ursine_api::UserSummary;
 
 use crate::app::Message;
+use crate::package_ui::{text_row, ConfirmVm};
 
 #[derive(Default)]
 pub struct UsersState {
@@ -180,35 +181,27 @@ impl UsersState {
             );
         }
 
-        if let Some(user) = &self.pending_delete {
-            items.push(
-                settings::section()
-                    .title("Confirm account deletion")
-                    .add(settings::item(
-                        "Consequences",
-                        text(format!(
-                            "Delete {} ({}) and the account's home directory? This cannot be undone.",
-                            user.name, user.uid
-                        )),
-                    ))
-                    .add(settings::item(
-                        "Actions",
-                        row(vec![
-                            button::destructive("Delete account")
-                                .on_press_maybe(
-                                    (!self.action_busy).then_some(Message::DeleteUserConfirmed),
-                                )
-                                .into(),
-                            button::text("Cancel")
-                                .on_press(Message::DeleteUserCancelled)
-                                .into(),
-                        ])
-                        .spacing(8),
-                    ))
-                    .into(),
-            );
-        }
-
         scrollable(column(items).spacing(16).padding(24)).into()
+    }
+}
+
+impl UsersState {
+    /// Pending account-deletion confirmation as modal data.
+    pub(crate) fn pending_confirm(&self) -> Option<ConfirmVm<'_>> {
+        let user = self.pending_delete.as_ref()?;
+        Some(ConfirmVm {
+            title: "Confirm account deletion".to_string(),
+            rows: vec![(
+                "Consequences".to_string(),
+                text_row(format!(
+                    "Delete {} ({}) and the account's home directory? This cannot be undone.",
+                    user.name, user.uid
+                )),
+            )],
+            confirm: Message::DeleteUserConfirmed,
+            cancel: Message::DeleteUserCancelled,
+            armed: !self.action_busy,
+            destructive: true,
+        })
     }
 }

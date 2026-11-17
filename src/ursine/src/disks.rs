@@ -7,6 +7,7 @@ use cosmic::Element;
 use ursine_api::{Disk, DiskView, DISK_FSTYPES};
 
 use crate::app::Message;
+use crate::package_ui::{text_row, ConfirmVm};
 
 #[derive(Default)]
 pub struct DisksState {
@@ -180,107 +181,89 @@ impl DisksState {
         items.push(list.into());
 
         // --- destructive flows (one at a time) ---
+        scrollable(column(items).spacing(16).padding(24)).into()
+    }
+}
+
+impl DisksState {
+    /// Pending format/create/delete flows as modal data (params,
+    /// type-to-confirm input and buttons all live in the dialog).
+    pub(crate) fn pending_confirm(&self) -> Option<ConfirmVm<'_>> {
         if let Some(target) = &self.format_target {
-            let section = settings::section()
-                .title(format!("Format {target}"))
-                .add(settings::item(
-                    "Filesystem",
-                    dropdown(
-                        DISK_FSTYPES.to_vec(),
-                        Some(self.fstype_index),
-                        Message::DiskFormatFstypeChanged,
+            return Some(ConfirmVm {
+                title: format!("Format {target}"),
+                rows: vec![
+                    (
+                        "Filesystem".to_string(),
+                        dropdown(
+                            DISK_FSTYPES.to_vec(),
+                            Some(self.fstype_index),
+                            Message::DiskFormatFstypeChanged,
+                        )
+                        .into(),
                     ),
-                ))
-                .add(settings::item(
-                    "Type the device to confirm",
-                    text_input(target, self.confirm_device.clone())
-                        .on_input(Message::DiskConfirmChanged),
-                ))
-                .add(settings::item(
-                    "Actions",
-                    row(vec![
-                        button::destructive("Format (wipes all data)")
-                            .on_press_maybe(
-                                (!self.action_busy).then_some(Message::DiskFormatConfirmed),
-                            )
+                    (
+                        "Type the device to confirm".to_string(),
+                        text_input(target, self.confirm_device.clone())
+                            .on_input(Message::DiskConfirmChanged)
                             .into(),
-                        button::text("Cancel")
-                            .on_press_maybe(
-                                (!self.action_busy).then_some(Message::DiskFlowCancelled),
-                            )
-                            .into(),
-                    ])
-                    .spacing(8),
-                ));
-            items.push(section.into());
+                    ),
+                ],
+                confirm: Message::DiskFormatConfirmed,
+                cancel: Message::DiskFlowCancelled,
+                armed: !self.action_busy,
+                destructive: true,
+            });
         }
         if let Some(target) = &self.create_target {
-            let section = settings::section()
-                .title(format!("New partition on {target}"))
-                .add(settings::item(
-                    "Start (MiB)",
-                    text_input("1024", self.create_start.clone())
-                        .on_input(Message::DiskCreateStartChanged),
-                ))
-                .add(settings::item(
-                    "End (MiB)",
-                    text_input("2048", self.create_end.clone())
-                        .on_input(Message::DiskCreateEndChanged),
-                ))
-                .add(settings::item(
-                    "Type the device to confirm",
-                    text_input(target, self.confirm_device.clone())
-                        .on_input(Message::DiskConfirmChanged),
-                ))
-                .add(settings::item(
-                    "Actions",
-                    row(vec![
-                        button::destructive("Create partition")
-                            .on_press_maybe(
-                                (!self.action_busy).then_some(Message::DiskCreateConfirmed),
-                            )
+            return Some(ConfirmVm {
+                title: format!("New partition on {target}"),
+                rows: vec![
+                    (
+                        "Start (MiB)".to_string(),
+                        text_input("1024", self.create_start.clone())
+                            .on_input(Message::DiskCreateStartChanged)
                             .into(),
-                        button::text("Cancel")
-                            .on_press_maybe(
-                                (!self.action_busy).then_some(Message::DiskFlowCancelled),
-                            )
+                    ),
+                    (
+                        "End (MiB)".to_string(),
+                        text_input("2048", self.create_end.clone())
+                            .on_input(Message::DiskCreateEndChanged)
                             .into(),
-                    ])
-                    .spacing(8),
-                ));
-            items.push(section.into());
+                    ),
+                    (
+                        "Type the device to confirm".to_string(),
+                        text_input(target, self.confirm_device.clone())
+                            .on_input(Message::DiskConfirmChanged)
+                            .into(),
+                    ),
+                ],
+                confirm: Message::DiskCreateConfirmed,
+                cancel: Message::DiskFlowCancelled,
+                armed: !self.action_busy,
+                destructive: true,
+            });
         }
-        if let Some((target, number)) = &self.delete_target {
-            let section = settings::section()
-                .title(format!("Delete partition {number} on {target}"))
-                .add(settings::item(
-                    "Consequences",
-                    text("The partition and its data are removed from the table."),
-                ))
-                .add(settings::item(
-                    "Type the device to confirm",
+        let (target, number) = self.delete_target.as_ref()?;
+        Some(ConfirmVm {
+            title: format!("Delete partition {number} on {target}"),
+            rows: vec![
+                (
+                    "Consequences".to_string(),
+                    text_row("The partition and its data are removed from the table."),
+                ),
+                (
+                    "Type the device to confirm".to_string(),
                     text_input(target, self.confirm_device.clone())
-                        .on_input(Message::DiskConfirmChanged),
-                ))
-                .add(settings::item(
-                    "Actions",
-                    row(vec![
-                        button::destructive("Delete partition")
-                            .on_press_maybe(
-                                (!self.action_busy).then_some(Message::DiskDeleteConfirmed),
-                            )
-                            .into(),
-                        button::text("Cancel")
-                            .on_press_maybe(
-                                (!self.action_busy).then_some(Message::DiskFlowCancelled),
-                            )
-                            .into(),
-                    ])
-                    .spacing(8),
-                ));
-            items.push(section.into());
-        }
-        scrollable(column(items).spacing(16).padding(24)).into()
+                        .on_input(Message::DiskConfirmChanged)
+                        .into(),
+                ),
+            ],
+            confirm: Message::DiskDeleteConfirmed,
+            cancel: Message::DiskFlowCancelled,
+            armed: !self.action_busy,
+            destructive: true,
+        })
     }
 }
 
