@@ -23,8 +23,10 @@ DOCS_IMAGE=${URSINE_DOCS_IMAGE:-ursine-docs:1}
 CARGO_HOME_DIR=${CARGO_HOME:-/work/artifacts/cargo-home}
 
 run_ci() {
+  # RUST_MIN_STACK: libtest gives each test thread 2 MiB; the debug
+  # inprocess daemon stack (growing Action enum) needs 16 MiB.
   "$RUNTIME" run --rm --network=host -v "$ROOT:/work" -w /work \
-    -e "CARGO_HOME=$CARGO_HOME_DIR" "$CI_IMAGE" "$@"
+    -e "CARGO_HOME=$CARGO_HOME_DIR" -e RUST_MIN_STACK=16777216 "$CI_IMAGE" "$@"
 }
 
 run_static() {
