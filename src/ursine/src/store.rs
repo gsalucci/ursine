@@ -533,13 +533,10 @@ impl StoreState {
         self.filter_keys = if self.search_done {
             self.search_results
                 .iter()
-                .map(|result| {
-                    match (&result.pname, &result.version) {
-                        (Some(name), Some(version)) => format!("{name} {version}"),
-                        (Some(name), None) => name.clone(),
-                        (None, _) => result.attr.clone(),
-                    }
-                    .to_lowercase()
+                .map(|result| match (&result.pname, &result.version) {
+                    (Some(name), Some(version)) => format!("{name} {version}"),
+                    (Some(name), None) => name.clone(),
+                    (None, _) => result.attr.clone(),
                 })
                 .collect()
         } else {
@@ -547,8 +544,8 @@ impl StoreState {
                 .iter()
                 .map(|package| {
                     package.version.as_deref().map_or_else(
-                        || package.name.to_lowercase(),
-                        |version| format!("{} {version}", package.name).to_lowercase(),
+                        || package.name.clone(),
+                        |version| format!("{} {version}", package.name),
                     )
                 })
                 .collect()
@@ -583,7 +580,7 @@ impl StoreState {
 
         let enabled = self.scope_ready();
 
-        // --- pending confirmations (all stack at the top) ---
+        // --- pending confirmations (stacked in the confirm modal) ---
         let mut confirms: Vec<ConfirmVm> = Vec::new();
         if let Some(pending) = &self.pending {
             let label = pending
@@ -871,14 +868,14 @@ impl StoreState {
         let showing_results = self.search_done;
         // Filter the SOURCE against precomputed keys (zero allocations
         // per frame), then build ONLY the current page's widgets.
-        let query = self.installed_filter.trim().to_lowercase();
+        let query = self.installed_filter.trim();
         let filtering = !query.is_empty();
         let (matched, rows): (usize, Vec<RowVm<'_>>) = if showing_results {
             let matches: Vec<&SearchResult> = self
                 .search_results
                 .iter()
                 .zip(self.filter_keys.iter())
-                .filter(|(_, key)| key.contains(&query))
+                .filter(|(_, key)| crate::package_ui::contains_ci(key, query))
                 .map(|(result, _)| result)
                 .collect();
             let len = matches.len();
@@ -922,7 +919,7 @@ impl StoreState {
                 .packages
                 .iter()
                 .zip(self.filter_keys.iter())
-                .filter(|(_, key)| key.contains(&query))
+                .filter(|(_, key)| crate::package_ui::contains_ci(key, query))
                 .map(|(package, _)| package)
                 .collect();
             let len = matches.len();

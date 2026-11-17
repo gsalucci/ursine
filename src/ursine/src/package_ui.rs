@@ -23,6 +23,19 @@ use crate::app::Message;
 /// matter how large the installed list or the generation history is.
 pub const PAGE_SIZE: usize = 50;
 
+/// Case-insensitive ASCII substring match without allocating — the
+/// filter runs over RAW titles (the true package names, never
+/// lowercased) on every frame.
+pub fn contains_ci(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
 /// `(page_count, clamped page, start index)` for `len` items — the
 /// single pagination rule shared by every list.
 pub fn page_bounds(len: usize, page: usize) -> (usize, usize, usize) {
@@ -45,8 +58,8 @@ pub struct RefreshVm {
     pub armed: bool,
 }
 
-/// A pending confirmation. ALL confirms render at the top through
-/// [`confirm_block`] — same shape everywhere.
+/// A pending confirmation. ALL confirms render in the modal built by
+/// [`confirm_dialog`] (never on the page) — same shape everywhere.
 pub struct ConfirmVm {
     pub title: String,
     /// Context rows shown above the buttons, e.g. ("Consequences", …).
@@ -146,7 +159,8 @@ pub struct PackageVm<'a> {
     pub busy: Option<String>,
     pub error: Option<String>,
     pub message: Option<&'a str>,
-    /// Pending confirmations, stacked at the top in adapter order.
+    /// Pending confirmations — rendered in the confirm modal, stacked
+    /// in adapter order.
     pub confirms: Vec<ConfirmVm>,
     pub scope: SectionVm<'a>,
     pub maintenance: Option<SectionVm<'a>>,
@@ -223,7 +237,8 @@ pub fn view<'a>(vm: PackageVm<'a>) -> Element<'a, Message> {
         busy,
         error,
         message,
-        confirms,
+        // Confirmations render in their own modal (confirm_dialog).
+        confirms: _,
         scope,
         maintenance,
         upgrade,
@@ -249,9 +264,6 @@ pub fn view<'a>(vm: PackageVm<'a>) -> Element<'a, Message> {
     items.extend(status_items(error.as_deref(), message));
     if let Some(busy) = busy {
         items.push(text(busy).into());
-    }
-    for confirm in confirms {
-        items.push(confirm_block(confirm));
     }
 
     // The plan (canonical order minus hidden sections) drives what
@@ -652,6 +664,34 @@ fn browser_dialog(
         .into()
 }
 
+/// All pending confirmations of the active manager in ONE modal —
+/// never inline, never at the page top (user decision). A single
+/// confirmation keeps its own title; stacked ones share "Confirm".
+pub fn confirm_dialog(confirms: Vec<ConfirmVm>) -> Element<'static, Message> {
+    let title = confirms
+        .first()
+        .filter(|_| confirms.len() == 1)
+        .map_or_else(|| "Confirm".to_string(), |confirm| confirm.title.clone());
+    let blocks: Vec<Element<'static, Message>> = confirms.into_iter().map(confirm_block).collect();
+    dialog()
+        .title(title)
+        .control(column(blocks).spacing(12))
+        .width(Length::Fixed(900.0))
+        .max_height(Pixels(600.0))
+        .into()
+}
+
+/// Job progress in the SAME modal slot the confirmation just used:
+/// the window transitions confirm → output after Confirm.
+pub fn progress_dialog(title: String, content: Element<'_, Message>) -> Element<'_, Message> {
+    dialog()
+        .title(title)
+        .control(content)
+        .width(Length::Fixed(900.0))
+        .max_height(Pixels(600.0))
+        .into()
+}
+
 /// The installed/search list as a half-page browser dialog.
 pub fn list_dialog(list: ListVm<'_>, close: Message) -> Element<'_, Message> {
     let title = list.title.clone();
@@ -749,6 +789,16 @@ mod tests {
             }),
             generations_browse: Message::StoreGenerationsBrowserClose,
         }
+    }
+
+    #[test]
+    fn contains_ci_matches_without_lowercasing() {
+        assert!(contains_ci("acl-libs 2.3.2", "ACL"));
+        assert!(contains_ci("acl-libs 2.3.2", "LIBS 2"));
+        assert!(contains_ci("Bitwarden 1.0", "bit"));
+        assert!(!contains_ci("bash 5.2", "zsh"));
+        assert!(contains_ci("anything", ""));
+        assert!(!contains_ci("ab", "abcd"));
     }
 
     #[test]

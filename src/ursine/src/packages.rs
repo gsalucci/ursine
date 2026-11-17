@@ -217,12 +217,12 @@ impl PackagesState {
             Some(PackageKind::Apk) => self
                 .apk
                 .iter()
-                .map(|package| format!("{} {}", package.name, package.version).to_lowercase())
+                .map(|package| format!("{} {}", package.name, package.version))
                 .collect(),
             Some(PackageKind::Flatpak) => self
                 .flatpak
                 .iter()
-                .map(|package| format!("{} {}", package.name, package.version).to_lowercase())
+                .map(|package| format!("{} {}", package.name, package.version))
                 .collect(),
             None => Vec::new(),
         };
@@ -305,7 +305,7 @@ impl PackagesState {
             PackageKind::Flatpak => "flatpak",
         };
 
-        // --- pending confirmations (all stack at the top) ---
+        // --- pending confirmations (stacked in the confirm modal) ---
         let mut confirms: Vec<ConfirmVm> = Vec::new();
         if let Some((op, pattern)) = &self.pending_pattern {
             confirms.push(ConfirmVm {
@@ -697,7 +697,7 @@ impl PackagesState {
         // --- Bottom list (Installed / search results) ---
         // Filter the SOURCE against precomputed keys (zero allocations
         // per frame), then build ONLY the current page's widgets.
-        let query = self.installed_filter.trim().to_lowercase();
+        let query = self.installed_filter.trim();
         let filtering = !query.is_empty();
         let (matched, rows): (usize, Vec<RowVm<'_>>) = match kind {
             PackageKind::Apk => {
@@ -705,7 +705,7 @@ impl PackagesState {
                     .apk
                     .iter()
                     .zip(self.filter_keys.iter())
-                    .filter(|(_, key)| key.contains(&query))
+                    .filter(|(_, key)| crate::package_ui::contains_ci(key, query))
                     .map(|(package, _)| package)
                     .collect();
                 let len = matches.len();
@@ -773,7 +773,7 @@ impl PackagesState {
                     .flatpak
                     .iter()
                     .zip(self.filter_keys.iter())
-                    .filter(|(_, key)| key.contains(&query))
+                    .filter(|(_, key)| crate::package_ui::contains_ci(key, query))
                     .map(|(package, _)| package)
                     .collect();
                 let len = matches.len();

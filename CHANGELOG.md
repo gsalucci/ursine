@@ -15,13 +15,23 @@
 
 ### Added
 
+- **Confirmations and job output moved out of the page into one
+  modal** (user decision): every confirm of every section/manager
+  renders in a centered dialog instead of the page top, and the
+  shell/job output opens in the SAME dialog slot right after
+  Confirm (confirm → progress, one window). The page never stacks
+  confirm blocks or the terminal panel anymore; browsers keep their
+  lower priority. Close on the progress dialog still appears only
+  when the job finishes (unchanged package-progress rule).
 - **Pagination everywhere it matters** (user decision): installed
   lists (all three managers) and nix generations render 50 rows per
   page (`Previous / Page N of M / Next` in the browser dialog);
   `page_bounds` is the single shared rule.
-- **Zero-allocation filtering**: row titles are lowercased once when
-  the list changes (`filter_keys`), not on every frame; nix
-  generations scan entry boundaries without building strings off-page.
+- **Zero-allocation filtering with NO case folding anywhere**: row
+  titles are cached raw when the list changes (`filter_keys`) and the
+  filter compares them case-insensitively (`contains_ci`) — the true
+  package names are never lowercased; nix generations scan entry
+  boundaries without building strings off-page.
 - **nix installed rows show the version** (`name version` like the
   others), parsed from the store path
   (`/nix/store/<hash>-<name>-<version>`, best-effort).

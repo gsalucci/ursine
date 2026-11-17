@@ -2081,17 +2081,43 @@ impl cosmic::Application for App {
         cosmic::iced::Subscription::batch(subscriptions)
     }
 
-    /// Half-page browsers (installed list, nix generations) render as
-    /// centered modals over the package screen.
+    /// One modal at a time, in priority order: pending confirmations
+    /// → job progress (the window the confirm just used) → the
+    /// half-page browsers (installed list, nix generations).
     fn dialog(&self) -> Option<Element<'_, Self::Message>> {
-        if self.screen != Screen::Packages {
-            return None;
-        }
+        // Never over the login screen (stale pending state must not
+        // survive a sign-out).
+        self.session.as_ref()?;
         let updates_auto = self
             .settings
             .config
             .as_ref()
             .map_or_else(UpdatesAuto::default, |config| config.updates);
+        // 1) Confirmations of the active manager, stacked in one modal.
+        let confirms = match self.package_tab {
+            PackageTab::Nix => self.store.vm(updates_auto.nix).confirms,
+            PackageTab::Apk => self.packages.vm(PackageKind::Apk, updates_auto).confirms,
+            PackageTab::Flatpak => {
+                self.packages
+                    .vm(PackageKind::Flatpak, updates_auto)
+                    .confirms
+            }
+        };
+        if !confirms.is_empty() {
+            return Some(crate::package_ui::confirm_dialog(confirms));
+        }
+        // 2) A running job: same modal slot, now showing the output
+        //    (Close appears inside once the job finishes).
+        if let Some(job) = &self.job {
+            return Some(crate::package_ui::progress_dialog(
+                job.label.clone(),
+                job_panel(job),
+            ));
+        }
+        // 3) Browsers, only on the package screen.
+        if self.screen != Screen::Packages {
+            return None;
+        }
         match self.package_tab {
             PackageTab::Nix => {
                 if self.store.list_browser {
@@ -2853,13 +2879,7 @@ impl App {
             PackageTab::Nix => self.store.view(updates_auto.nix),
             PackageTab::Apk | PackageTab::Flatpak => self.packages.view(updates_auto),
         };
-        if let Some(job) = &self.job {
-            // Below the tabs so the tab row never jumps; shared by all three
-            // package tabs (a job may span a tab switch).
-            let column_items: Vec<Element<'_, Message>> =
-                vec![tabs.into(), job_panel(job), content];
-            return column(column_items).spacing(12).into();
-        }
+        // The job output lives in its own modal (Application::dialog).
         column(vec![tabs.into(), content]).spacing(12).into()
     }
 
