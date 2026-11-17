@@ -108,21 +108,10 @@ jobs:
           restore-keys: |
             cargo-test-${{ matrix.features || 'default' }}-
       - name: Test (single pass — clippy lints + all tests)
-        # clippy-driver compiles ONCE with the workspace lint config
-        # and -D warnings, then runs the suite — no separate clippy
-        # build anywhere. libtest runs each test on its own thread
-        # (2 MiB default); the growing Action enum pushed deep
-        # daemon-call frames over that limit under debug builds.
-        env:
-          RUST_MIN_STACK: 16777216
-          RUSTC_WORKSPACE_WRAPPER: clippy-driver
-          CLIPPY_ARGS: "-Dwarnings"
-        run: |
-          if [ -z "${{ matrix.features }}" ]; then
-            cargo test --workspace --exclude ursine --no-default-features --all-targets --locked
-          else
-            cargo test --workspace --exclude ursine --features ${{ matrix.features }} --all-targets --locked
-          fi
+        # scripts/test-gate.sh is the single source of truth shared with
+        # `scripts/dev.sh check`: same legs, same flags, single-pass
+        # clippy-driver wrapper, same RUST_MIN_STACK.
+        run: sh scripts/test-gate.sh ${{ matrix.features || 'default' }}
       - name: Save Cargo cache
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
@@ -199,11 +188,8 @@ jobs:
           restore-keys: |
             cargo-gui-
       - name: GUI test (single pass — clippy lints + tests)
-        run: cargo test -p ursine --all-targets --locked
-        env:
-          RUST_MIN_STACK: 16777216
-          RUSTC_WORKSPACE_WRAPPER: clippy-driver
-          CLIPPY_ARGS: "-Dwarnings"
+        # Same script as local: scripts/test-gate.sh gui.
+        run: sh scripts/test-gate.sh gui
       - name: Save Cargo cache
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true

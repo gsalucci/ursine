@@ -4,12 +4,11 @@
 #
 #   scripts/dev.sh image          build ursine-ci
 #   scripts/dev.sh build          cargo build (all features)
-#   scripts/dev.sh test           cargo test (all features)
-#   scripts/dev.sh clippy         cargo clippy -D warnings
+#   scripts/dev.sh test           full test gate (same legs as CI)
 #   scripts/dev.sh fmt            cargo fmt --check
-#   scripts/dev.sh check          fmt + clippy + test (full workspace)
-#   scripts/dev.sh fast           fmt + clippy/test scoped to the change
-#                                 + pure lints (no rust recompilation)
+#   scripts/dev.sh check          fmt + full test gate (identical to CI)
+#   scripts/dev.sh fast           fmt + test gate scoped to the change
+#                                 + pure lints (seconds, no analyzers)
 #   scripts/dev.sh static [group] static analysis (default: all)
 #   scripts/dev.sh docs           markdownlint
 set -eu
@@ -52,38 +51,39 @@ build)
   run_ci cargo build --workspace --all-features --locked
   ;;
 test)
-  run_ci cargo test --workspace --all-features --locked
-  ;;
-clippy)
-  run_ci cargo clippy --workspace --all-targets --all-features -- -D warnings
+  # Full gate without fmt: same legs as CI (stub + pam + gui).
+  run_ci sh scripts/test-gate.sh all
   ;;
 fmt)
   run_ci cargo fmt --check
   ;;
 check)
-  # ONE compilation: clippy-driver lints the workspace (with -D
-  # warnings) while it builds the tests — no separate clippy pass.
-  run_ci sh -c 'cargo fmt --check && RUSTC_WORKSPACE_WRAPPER=clippy-driver CLIPPY_ARGS="-Dwarnings" cargo test --workspace --all-features --locked'
+  # Identical to the CI test/gui jobs: scripts/test-gate.sh is the one
+  # source of truth (stub + pam + gui legs, single pass each).
+  run_ci sh -c 'cargo fmt --check && sh scripts/test-gate.sh all'
   ;;
 fast)
   # Iteration gate (the one to use while editing): fmt always, then
-  # clippy+test SCOPED to what changed (a ursine-only edit must not
-  # rebuild the workspace twice), then the pure lints — no rust
-  # recompilation at all. CI still runs the full matrix; use `check`
-  # and `static all` before a release.
+  # the test gate SCOPED to what changed (a GUI-only edit must not
+  # rebuild the daemon), then the pure lints. CI runs the full matrix;
+  # use `check` and `static all` before a release.
   run_ci cargo fmt --check
-  changed=$( (git diff --name-only HEAD; git ls-files --others --exclude-standard) | sort -u )
-  if printf '%s\n' "$changed" | grep -qE '^(Cargo\.(toml|lock)|rust-toolchain|src/ursine-api/|src/ursine-core/|src/ursined/)'; then
-    scope="--workspace --all-targets --all-features"
+  changed=$( (
+    git diff --name-only HEAD
+    git ls-files --others --exclude-standard
+  ) | sort -u)
+  if printf '%s\n' "$changed" | grep -qE '^(Cargo\.(toml|lock)|rust-toolchain)'; then
+    scope="all"
+  elif printf '%s\n' "$changed" | grep -qE '^(src/ursine-api/|src/ursine-core/|src/ursined/|src/ursinectl/)'; then
+    scope="default pam"
   elif printf '%s\n' "$changed" | grep -q '^src/ursine/'; then
-    scope="-p ursine --all-targets --all-features"
-  elif printf '%s\n' "$changed" | grep -q '^src/ursinectl/'; then
-    scope="-p ursinectl --all-targets --all-features"
+    scope="gui"
   else
     scope=""
   fi
   if [ -n "$scope" ]; then
-    run_ci sh -c "RUSTC_WORKSPACE_WRAPPER=clippy-driver CLIPPY_ARGS=\"-Dwarnings\" cargo test $scope --locked"
+    # shellcheck disable=SC2086 # scope is a deliberate word list of gate legs
+    run_ci sh scripts/test-gate.sh $scope
   fi
   run_static sh scripts/static-check.sh repo
   run_docs sh scripts/docs-check.sh
@@ -95,7 +95,7 @@ docs)
   run_docs sh scripts/docs-check.sh
   ;;
 *)
-  echo "usage: scripts/dev.sh {image|build|test|clippy|fmt|check|fast|static [group]|docs}" >&2
+  echo "usage: scripts/dev.sh {image|build|test|fmt|check|fast|static [group]|docs}" >&2
   exit 2
   ;;
 esac

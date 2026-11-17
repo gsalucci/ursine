@@ -20,25 +20,36 @@ rustfmt, PAM headers and the GUI build dependencies.
 Canonical shortcut (same images and commands as CI):
 
 ```bash
-scripts/dev.sh fast         # WHILE EDITING: fmt + clippy/test scoped to
-                            # the changed crates + pure lints (typos, ec,
+scripts/dev.sh fast         # WHILE EDITING: fmt + test gate scoped to
+                            # the change + pure lints (typos, ec,
                             # shellcheck, taplo, actionlint, zizmor,
-                            # gitleaks) + markdown — no rust recompilation
-scripts/dev.sh check        # fmt + single-pass test (clippy lints ride
-                            # the same compilation, full workspace)
+                            # gitleaks) + markdown
+scripts/dev.sh check        # fmt + FULL test gate — byte-identical to
+                            # the CI test/gui jobs (scripts/test-gate.sh)
 scripts/dev.sh static all   # analyzers (CI runs these too)
 scripts/dev.sh docs         # Markdown
 ```
 
+**Test gate** (`scripts/test-gate.sh`): the single source of truth used
+by `dev.sh check/test` AND the CI `test (default)`/`test (pam)`/`gui`
+jobs — local and push run the same commands, so no test can exist in
+one place only. Three legs, each a SINGLE pass (clippy-driver lints
+ride the compilation that builds the tests):
+
+- `default` — workspace minus GUI, `--no-default-features` (stub auth)
+- `pam` — workspace minus GUI, `--features pam`
+- `gui` — `-p ursine` only
+- `all` — the three legs in order (what `check` runs)
+
 **Time policy** (tests are never dropped — they are staged):
 
-- **Per edit**: `fast`. A `src/ursine/**`-only change compiles and
-  tests just the `ursine` crate (not the workspace twice); an
-  `api`/`core`/`Cargo.*` change falls back to the full workspace.
-  The pure lints never compile anything, so they cost seconds.
-- **Before push**: CI is the authoritative full gate (test matrix,
-  clippy, rustdoc, analyzer groups) — run `check` locally if you
-  want assurance before pushing, but CI re-runs everything anyway.
+- **Per edit**: `fast`. A `src/ursine/**`-only change runs just the
+  `gui` leg; an `api`/`core`/`ursined`/`ursinectl` change runs the
+  `default` + `pam` legs; a `Cargo.*` change runs `all`. The pure
+  lints never compile anything, so they cost seconds.
+- **Before push**: CI is the authoritative full gate (the same test
+  gate, rustdoc, analyzer groups) — run `check` locally if you want
+  assurance before pushing, but CI re-runs everything anyway.
 - **Before a release**: `static all` locally once (it duplicates the
   CI analyzer on purpose as the last line of defense).
 
@@ -49,21 +60,19 @@ podman run --rm --network=host -v "$PWD:/work" -w /work \
   -e CARGO_HOME=/work/artifacts/cargo-home ursine-ci:1 \
   sh -c 'cargo fmt --check'
 
-# Single pass: clippy-driver lints (workspace [lints] + -D warnings)
-# during the ONE compilation that also builds the tests.
+# The full gate (all three legs, single pass each) — same script CI runs:
 podman run --rm --network=host -v "$PWD:/work" -w /work \
   -e CARGO_HOME=/work/artifacts/cargo-home \
-  -e RUST_MIN_STACK=16777216 \
-  -e RUSTC_WORKSPACE_WRAPPER=clippy-driver \
-  -e CLIPPY_ARGS="-Dwarnings" \
   ursine-ci:1 \
-  sh -c 'cargo test --workspace --all-features --locked'
+  sh scripts/test-gate.sh all
 ```
 
-Test commands export `RUST_MIN_STACK=16777216`: libtest gives each test
-thread 2 MiB by default and the debug-build daemon call stack (the
-growing `Action` enum) exceeds it in the inprocess suite (stack
-overflow). The CI test/gui jobs set the same variable.
+`scripts/test-gate.sh` exports `RUSTC_WORKSPACE_WRAPPER=clippy-driver`,
+`CLIPPY_ARGS=-Dwarnings` and `RUST_MIN_STACK=16777216` itself: libtest
+gives each test thread 2 MiB by default and the debug-build daemon call
+stack (the growing `Action` enum) exceeds it in the inprocess suite
+(stack overflow). The CI test/gui jobs run the same script, so the
+environment cannot drift.
 
 `--network=host` is required on this host: pasta cannot create the tap device.
 
@@ -83,21 +92,21 @@ scripts/dev.sh static all
 ```
 
 Groups: `repo`, `sast`, `deps`, `duplicates`, `sbom`, `all`. The `rust` group
-is available only in `ursine-ci:1` (`scripts/dev.sh check`).
+(fmt + `scripts/test-gate.sh all` + rustdoc) runs only in `ursine-ci:1`;
+in `ursine-static:1` it reports itself as not installed. `dev.sh check`
+covers the same gate without the analyzers.
 
 Policy and gates: `docs/STATIC-ANALYSIS.md`.
 
 ## 4. Feature matrix
 
+Covered by the test gate legs (`scripts/test-gate.sh default|pam`);
+`check` runs both plus the GUI leg:
+
 ```bash
-# default (stub auth)
-... cargo test --workspace --no-default-features
-
-# real PAM build
-... cargo test --workspace --features pam
-
-# everything
-... cargo test --workspace --all-features
+podman run --rm --network=host -v "$PWD:/work" -w /work \
+  -e CARGO_HOME=/work/artifacts/cargo-home ursine-ci:1 \
+  sh scripts/test-gate.sh default pam
 ```
 
 ## 5. Release builds
@@ -134,17 +143,17 @@ podman run --rm --network=host -v "$PWD:/work" -w /work nixos/nix \
 1. **image** builds the Alpine musl dev image once and pushes
    `ursine-ci:main` (or uses the GHA layer cache). Test/lint/gui/package pull
    that image.
-2. **test (default)** and **test (pam)** run a SINGLE pass:
-   `RUSTC_WORKSPACE_WRAPPER=clippy-driver CLIPPY_ARGS="-Dwarnings"
-   cargo test …` — clippy lints (workspace `[lints]`, `-D warnings`)
-   and the whole suite come out of one compilation. The GUI is excluded
-   here because it has its own job. Jobs are skipped on tags.
+2. **test (default)** and **test (pam)** run `sh scripts/test-gate.sh
+   default|pam` — the SAME script `scripts/dev.sh check` runs locally.
+   Each leg is a SINGLE pass: clippy-driver lints (workspace `[lints]`,
+   `-D warnings`) and the suite come out of one compilation. The GUI is
+   excluded here because it has its own job. Jobs are skipped on tags.
 3. **lint** runs `cargo fmt --check` and rustdoc with `-D warnings` only —
    clippy rides the test jobs (single pass), so there is no second clippy
    build anywhere in the pipeline. Skipped on tags.
-4. **gui** runs the same single pass for `-p ursine`
-   (`clippy-driver` wrapper + `cargo test -p ursine --all-targets --locked`);
-   no separate `cargo build`, no repeated clippy. Skipped on tags.
+4. **gui** runs `sh scripts/test-gate.sh gui` — the same single-pass
+   leg the local gate uses for GUI-only changes; no separate
+   `cargo build`, no repeated clippy. Skipped on tags.
 5. **analyzer**, **docs**, and **zizmor** run in parallel. `analyzer` runs the
    repo/sast/deps/duplicates/sbom groups; `docs` runs markdownlint; `zizmor`
    audits workflow security.

@@ -21,7 +21,7 @@ Everything that makes Ursine buildable, testable, releasable and packagable — 
    - **Docker**: `alpine:3.22` container
    - `apk add rust cargo git nodejs` (+ `linux-pam-dev` on pam jobs)
    - `cargo test --workspace --no-default-features` / `--features pam` / `--features full`
-   - gate: single pass `RUSTC_WORKSPACE_WRAPPER=clippy-driver CLIPPY_ARGS="-Dwarnings" cargo test …` (clippy lints + all tests, one compilation) + `cargo fmt --check`
+   - gate: `sh scripts/test-gate.sh <leg>` — ONE script shared by `scripts/dev.sh check` and CI (legs `default`/`pam`/`gui`), each a single pass (clippy-driver lints + tests, one compilation) + `cargo fmt --check`
 2. `version` gate: reads `Cargo.toml`; on a tag it must equal `v<version>`. The expensive `package` job runs only on a release tag (plus a manual `workflow_dispatch` with `force_package`, and PR smoke when build inputs change) — branch pushes never build artifacts. Cargo registry and `artifacts/target` are cached with `actions/cache`.
 3. `flake`: **container** `nixos/nix` → `nix flake check` + `nix build --out-link artifacts/result` on push/PR — builds the pinned binary package in seconds (out-link rule: nothing but source files ever appears at repo root)
 4. `package` job (alpine rust image) builds release binaries ONLY on a tag (or forced dispatch / PR smoke). Branch pushes skip it entirely: artifacts are never built or staged without a tag.

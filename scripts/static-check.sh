@@ -26,7 +26,8 @@ rust_group() {
     return
   fi
   run cargo fmt --check
-  run cargo clippy --workspace --all-targets --all-features -- -D warnings
+  # Lints ride the test gate (single pass) — same script as dev/CI.
+  run sh scripts/test-gate.sh all
   step "cargo doc"
   if ! RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps; then STATUS=1; fi
 }
@@ -38,7 +39,7 @@ repo_group() {
   elif have ec; then
     run ec
   else step "editorconfig-checker: not installed"; fi
-  set -- install.sh scripts/audit-threshold.sh scripts/build-gui-dev.sh scripts/clean-artifacts.sh scripts/docs-check.sh scripts/static-check.sh \
+  set -- install.sh scripts/audit-threshold.sh scripts/build-gui-dev.sh scripts/clean-artifacts.sh scripts/docs-check.sh scripts/dev.sh scripts/static-check.sh scripts/test-gate.sh \
     src/tools/ursine-activate.sh src/tools/ursine-deactivate.sh \
     packaging/openrc/ursined packaging/dinit/ursined.wrapper
   if have shellcheck; then run shellcheck -x "$@"; else step "shellcheck: not installed"; fi
