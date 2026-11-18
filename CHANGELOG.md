@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### CI
+
+- **A tag release must be publicly downloadable**: the nix smoke now fetches
+  the published tarball anonymously (a draft answers 404 and fails the job)
+  and the publish step forces `--draft=false` after the uploads. The 0.39.2
+  tag had left the release in draft state, so the flake pinned an asset that
+  anonymous users could not fetch; `scripts/test-host.sh` exposed it.
+
 ## [0.39.2] — 2026-11-18
 
 ### Changed

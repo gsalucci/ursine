@@ -122,7 +122,8 @@ jobs:
           set -eu
           sha256sum -c ./*.sha256
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
-            || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+            || gh release create "$GITHUB_REF_NAME" --draft=false \
+              --title "$GITHUB_REF_NAME" --generate-notes
           assets=$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')
           for artifact in ./*.tar.gz ./*.sha256; do
             name=$(basename "$artifact")
@@ -132,6 +133,9 @@ jobs:
               gh release upload "$GITHUB_REF_NAME" "$artifact"
             fi
           done
+          # A draft is invisible to anonymous download; the flake needs the
+          # public URL, so the state is forced here and proven by the nix job.
+          gh release edit "$GITHUB_REF_NAME" --draft=false
 
       - name: Save Cargo cache (main only)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -182,11 +186,14 @@ jobs:
         if: github.ref_type == 'tag'
         run: |
           set -eu
+          # Anonymous download on purpose: a draft release answers 404, and the
+          # flake would pin an asset nobody can fetch.
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
           mkdir -p artifacts/release artifacts/smoke
-          gh release download "$GITHUB_REF_NAME" \
-            --pattern "$RELEASE_ASSET" --pattern "*.sha256" --dir artifacts/release
+          curl -fsSL -o "artifacts/release/$RELEASE_ASSET" "$base/$RELEASE_ASSET"
+          curl -fsSL -o "artifacts/release/$RELEASE_ASSET.sha256" "$base/$RELEASE_ASSET.sha256"
           cd artifacts/release
-          sha256sum -c ./*.sha256
+          sha256sum -c "./$RELEASE_ASSET.sha256"
           gzip -t "$RELEASE_ASSET"
           tar tzf "$RELEASE_ASSET" >/dev/null
           for entry in bin/ursined bin/ursinectl bin/ursine install.sh bin/ursine-activate; do
