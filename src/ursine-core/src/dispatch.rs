@@ -386,8 +386,14 @@ impl Daemon {
         // Root is superuser: the admin CLI (`ursinectl`) manages other
         // accounts; handlers validate that the target user EXISTS (typed
         // NotFound) and is a normal login user.
-        let own_account_only =
-            matches!(module, ModuleId::Theming | ModuleId::Crontab) || flatpak_user_scope;
+        let nix_registry_write = module == ModuleId::PackagesNix
+            && matches!(
+                action,
+                Action::AddNixRepository { .. } | Action::RemoveNixRepository { .. }
+            );
+        let own_account_only = matches!(module, ModuleId::Theming | ModuleId::Crontab)
+            || flatpak_user_scope
+            || nix_registry_write;
         let foreign_own_account_target = own_account_only
             && principal.user != "root"
             && as_user
@@ -399,7 +405,7 @@ impl Daemon {
             ))
         } else if foreign_own_account_target {
             Some(ApiError::invalid(
-                "theming, crontab and Flatpak user-scope actions only apply to your own account",
+                "theming, crontab, Flake registry and Flatpak user-scope actions only apply to your own account",
             ))
         } else if as_user
             .as_ref()
@@ -511,6 +517,11 @@ fn uses_profile(action: &Action) -> bool {
             | Action::WipeHistory { .. }
             | Action::DiffClosures { .. }
             | Action::PruneGenerations { .. }
+            // Flake registry: the user registry lives in the target's home
+            // (`~/.config/nix/registry.json`), so the actions are user-scoped.
+            | Action::ListNixRepositories
+            | Action::AddNixRepository { .. }
+            | Action::RemoveNixRepository { .. }
     )
 }
 
@@ -810,6 +821,70 @@ mod tests {
             }
             ResponseBody::Ok { .. } => {}
             ResponseBody::AuthOk { .. } => panic!("unexpected auth response"),
+        }
+    }
+
+    /// The flake registry lives in the target user's home: `as_user` is
+    /// honored, so the rules pass and only the capability gate may stop us
+    /// (nix is not installed in the CI image).
+    #[tokio::test]
+    async fn nix_registry_list_accepts_own_target() {
+        let (_clock, d) = daemon(&tmp_dir("nix-registry-own"));
+        let token = token(&d).await;
+        let call = Request {
+            v: PROTOCOL_VERSION,
+            id: Some(9),
+            token: Some(token),
+            body: RequestBody::Call {
+                module: ModuleId::PackagesNix,
+                action: Action::ListNixRepositories,
+                as_user: Some("skea999".into()),
+            },
+        };
+        let resp = d.handle(call, &peer()).await;
+        match resp.body {
+            ResponseBody::Err { error } => {
+                assert!(
+                    matches!(
+                        error.code,
+                        ErrorCode::Unavailable | ErrorCode::NotImplemented
+                    ),
+                    "{:?}: {}",
+                    error.code,
+                    error.message
+                );
+            }
+            ResponseBody::Ok { .. } => {}
+            ResponseBody::AuthOk { .. } => panic!("unexpected auth response"),
+        }
+    }
+
+    /// A non-root principal may not point a registry write at another
+    /// account: the file lands in that user's home.
+    #[tokio::test]
+    async fn nix_registry_add_rejects_foreign_target_for_non_root() {
+        let (_clock, d) = daemon(&tmp_dir("nix-registry-xuser"));
+        let token = token(&d).await;
+        let call = Request {
+            v: PROTOCOL_VERSION,
+            id: Some(10),
+            token: Some(token),
+            body: RequestBody::Call {
+                module: ModuleId::PackagesNix,
+                action: Action::AddNixRepository {
+                    name: "nixpkgs".into(),
+                    url: "github:NixOS/nixpkgs".into(),
+                },
+                as_user: Some("someone-else".into()),
+            },
+        };
+        let resp = d.handle(call, &peer()).await;
+        match resp.body {
+            ResponseBody::Err { error } => {
+                assert_eq!(error.code, ErrorCode::Invalid, "{}", error.message);
+                assert!(error.message.contains("own account"), "{}", error.message);
+            }
+            other => panic!("want err, got {other:?}"),
         }
     }
 

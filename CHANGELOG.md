@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Nix repositories rendered empty in the GUI**: `list_nix_repositories` and
+  the add/remove registry actions were missing from the user-scoped action
+  list, so any request carrying `as_user` was rejected and the section fell
+  back to the empty state (`flake:ursine` included). They are user-scoped now
+  (the registry lives in the target's home) and non-root callers may only
+  target their own account for registry writes. Rows keep the apk shape:
+  name, URL, Remove.
+
 ### CI
 
 - **A tag release must be publicly downloadable**: the nix smoke now fetches

@@ -782,13 +782,7 @@ impl StoreState {
         // Only after the load settled: an in-flight load must not claim
         // "only the default entry" while the rows are still coming.
         if self.repositories.is_empty() && self.error.is_none() && !self.busy {
-            repo_items.push(
-                settings::item(
-                    "Entries",
-                    text("Only the default nixpkgs repository (nothing extra)."),
-                )
-                .into(),
-            );
+            repo_items.push(settings::item("Entries", text("No flake registry entries.")).into());
         }
         for repository in &self.repositories {
             // Every row removes (apk/flatpak parity): user/default
