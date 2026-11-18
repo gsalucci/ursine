@@ -165,8 +165,12 @@ jobs:
       - name: Nix lint and flake evaluation (PR/main, no build)
         if: github.ref_type != 'tag'
         run: |
+          # The bind-mounted checkout belongs to the runner user while the
+          # container runs as root: libgit2 refuses a repository it does not
+          # own, so mark the mount safe inside the container.
           docker run --rm --network=host -v "$PWD:/work" -w /work \
             -e NIX_CONFIG="$NIX_CONFIG" "$NIX_IMAGE" sh -c '
+              git config --global --add safe.directory /work
               nix run nixpkgs#statix -- check flake.nix
               nix run nixpkgs#statix -- check nix
               nix run nixpkgs#deadnix -- --fail flake.nix nix
@@ -229,6 +233,7 @@ jobs:
           fi
           docker run --rm --network=host -v "$PWD:/work" -w /work \
             -e NIX_CONFIG="$NIX_CONFIG" "$NIX_IMAGE" sh -c '
+              git config --global --add safe.directory /work
               test "$(nix eval --raw .#packages.x86_64-linux.ursine.version)" = "'"${version}"'"
             '
           flake="ursine-flake-${GITHUB_REF_NAME}.tar.gz"
