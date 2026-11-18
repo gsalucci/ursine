@@ -28,18 +28,12 @@ pub async fn handle(action: &Action, ctx: &ModuleCtx<'_>) -> Result<serde_json::
         Action::MountDisk { device } => {
             validate_device(device)?;
             mount_device(device).await?;
-            Ok(json!(DiskView {
-                disks: list().await?,
-                format_enabled: ctx.config.disks_format,
-            }))
+            view(ctx).await
         }
         Action::UnmountDisk { device } => {
             validate_device(device)?;
             umount_device(device).await?;
-            Ok(json!(DiskView {
-                disks: list().await?,
-                format_enabled: ctx.config.disks_format,
-            }))
+            view(ctx).await
         }
         Action::FormatDisk {
             device,
@@ -53,13 +47,8 @@ pub async fn handle(action: &Action, ctx: &ModuleCtx<'_>) -> Result<serde_json::
             let flags = mkfs_args(fstype);
             let mut argv: Vec<&str> = flags.iter().map(String::as_str).collect();
             argv.push(device);
-            exec::run_root_program(&program, &argv, TIMEOUT)
-                .await
-                .map_err(|error| ApiError::new(error.code, error.message))?;
-            Ok(json!(DiskView {
-                disks: list().await?,
-                format_enabled: ctx.config.disks_format,
-            }))
+            run_root(&program, &argv).await?;
+            view(ctx).await
         }
         Action::PartitionCreate {
             device,
@@ -79,17 +68,8 @@ pub async fn handle(action: &Action, ctx: &ModuleCtx<'_>) -> Result<serde_json::
             let start = format!("{start_mib}MiB");
             let end = format!("{end_mib}MiB");
             let program = tool(&PARTED, "parted")?;
-            exec::run_root_program(
-                program,
-                &["-s", device, "mkpart", "primary", &start, &end],
-                TIMEOUT,
-            )
-            .await
-            .map_err(|error| ApiError::new(error.code, error.message))?;
-            Ok(json!(DiskView {
-                disks: list().await?,
-                format_enabled: ctx.config.disks_format,
-            }))
+            run_root(program, &["-s", device, "mkpart", "primary", &start, &end]).await?;
+            view(ctx).await
         }
         Action::PartitionDelete {
             device,
@@ -105,13 +85,8 @@ pub async fn handle(action: &Action, ctx: &ModuleCtx<'_>) -> Result<serde_json::
             }
             let number = number.to_string();
             let program = tool(&PARTED, "parted")?;
-            exec::run_root_program(program, &["-s", device, "rm", &number], TIMEOUT)
-                .await
-                .map_err(|error| ApiError::new(error.code, error.message))?;
-            Ok(json!(DiskView {
-                disks: list().await?,
-                format_enabled: ctx.config.disks_format,
-            }))
+            run_root(program, &["-s", device, "rm", &number]).await?;
+            view(ctx).await
         }
         _ => Err(ApiError::invalid("action is not valid for module disks")),
     }
@@ -120,6 +95,22 @@ pub async fn handle(action: &Action, ctx: &ModuleCtx<'_>) -> Result<serde_json::
 /// Mount: use `/etc/fstab` when it names the device (the kernel picks the
 /// options and mountpoint); otherwise create `/media/ursine/<device>` and
 /// mount there — the plain-tools equivalent of what udisksctl did.
+/// Every disks mutation answers with the fresh view.
+async fn view(ctx: &ModuleCtx<'_>) -> Result<serde_json::Value, ApiError> {
+    Ok(json!(DiskView {
+        disks: list().await?,
+        format_enabled: ctx.config.disks_format,
+    }))
+}
+
+/// Run one root program with the disks timeout and the module error shape.
+async fn run_root(program: &str, argv: &[&str]) -> Result<(), ApiError> {
+    exec::run_root_program(program, argv, TIMEOUT)
+        .await
+        .map(|_| ())
+        .map_err(|error| ApiError::new(error.code, error.message))
+}
+
 async fn mount_device(device: &str) -> Result<(), ApiError> {
     use std::os::unix::fs::PermissionsExt;
     let program = tool(&MOUNT, "mount")?;
@@ -710,16 +701,11 @@ fn mkfs_args(fstype: &str) -> Vec<String> {
 }
 
 fn tool(candidates: &[&'static str], label: &str) -> Result<&'static str, ApiError> {
-    candidates
-        .iter()
-        .find(|path| Path::new(path).is_file())
-        .copied()
-        .ok_or_else(|| {
-            ApiError::unavailable(
-                format!("{label} not found"),
-                "apk add util-linux  # provides mount/umount/blkid/df",
-            )
-        })
+    crate::tooling::resolve(
+        candidates,
+        label,
+        "apk add util-linux  # provides mount/umount/blkid/df",
+    )
 }
 
 #[cfg(test)]

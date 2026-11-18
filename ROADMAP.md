@@ -9,12 +9,12 @@
 
 | Ver | Target | Status | What |
 |-----|--------|--------|------|
-| v0.1 | Skeleton | Planned | Workspace, ursine-api types, ursined skeleton (socket, PAM handshake, capabilities, audit), flake.nix musl, CI (test matrix per feature + flake build/publish) |
+| v0.1 | Skeleton | Released | Workspace, ursine-api types, ursined skeleton (socket, shadow handshake, capabilities, audit), flake.nix musl, CI (flake build/publish) |
 | v0.2 | nix module | Planned | install/remove/search/list via nix profiles per asUser |
 | v0.3 | Store GUI | Planned | ursine GUI: nix store + snapshots panel |
 | v0.4 | Users + niri | Baseline in 0.7.0 | passwd/shadow user panel (no D-Bus), niri config.kdl editor with `niri validate`; remaining niri form groups tracked in TASKS |
 | **v1.0** | **v1 release** | — | **backend + GUI complete (nix, users, snapshots, niri), packaged in feralos-aports** |
-| v2 | Full coverage | Planned | apk + flatpak; printers (CUPS), scanners (SANE), bluetooth (BlueZ), network (NetworkManager), firewall (firewalld), disks (UDisks2) — all via D-Bus/CLI, capability-gated; **uniform theming** section (shell theme → every toolkit, SPEC-theming) + uniform application top bar (specs pending); **booster** module (SPEC-booster: `/etc/booster.yaml` editor + initramfs regenerate via `/etc/kernel-hooks.d`, FeralOS-first); **apparmor** module (SPEC-apparmor: full CLI surface — status, modes, profile editor with syntax check, notifications) |
+| v2 | Full coverage | Planned | apk + flatpak; printers (CUPS), scanners (SANE), bluetooth (BlueZ), network (NetworkManager), firewall (firewalld), disks (parted) — all via system CLIs and files, capability-gated; **uniform theming** section (shell theme → every toolkit, SPEC-theming) + uniform application top bar (specs pending); **booster** module (SPEC-booster: `/etc/booster.yaml` editor + initramfs regenerate via `/etc/kernel-hooks.d`, FeralOS-first); **apparmor** module (SPEC-apparmor: full CLI surface — status, modes, profile editor with syntax check, notifications) |
 | v3 | OIDC + web + CLI | Planned | OIDC auth, web interface (LAST GUI frontend), thin CLI client (`ursinectl`, scriptable/headless admin + smoke tests; reuses `ursine-api` over the same socket), same UX model; **memory-safe stack required** (Rust→WASM preferred for web; see SPEC-web) |
 | v4 | Incus UI | Planned | Incus management UI in the same product |
 | v5 | ZFS + Pirateus | Planned | ZFS + LINSTOR/Pirateus storage management (FeralOS hyperconverged stack) |
@@ -25,9 +25,9 @@
 | Feature | Prio | Status | Notes |
 |---------|------|--------|-------|
 | Workspace + ursine-api | P0 | Next | serde JSON-lines protocol, Capability, tri-state config |
-| ursined skeleton | P0 | Next | unix socket, peer creds, PAM (feature-gated), capabilities scan, JSONL audit |
+| ursined skeleton | P0 | Done | unix socket, peer creds, shadow handshake, capabilities scan, JSONL audit |
 | flake.nix (musl static) | P0 | Planned | pkgsMusl/pkgsStatic, never glibc |
-| CI: test matrix per feature | P0 | Planned | Alpine container, cargo test × {default, pam, web, oidc, full}; clippy+fmt gate |
+| CI: single-pass gate | P0 | Done | Alpine container, `RUSTC_WORKSPACE_WRAPPER=clippy-driver CLIPPY_ARGS="-Dwarnings" cargo test` (clippy + all tests in one compilation) |
 | CI: build+publish nix flake | P0 | Planned | nix flake check + nix build per push; Release artifacts on tag |
 | Local build via Docker Alpine | P0 | Planned | rust:alpine container |
 | UI consistency baseline | P1 | Planned | one design language for all UIs (see docs/intent/ursine.md#ui-principles) |

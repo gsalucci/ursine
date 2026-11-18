@@ -1,14 +1,8 @@
 //! Scanners screen: SANE discovery and manual airscan setup.
 
-use cosmic::iced::Length;
-use cosmic::widget::selectable_text;
-use cosmic::widget::{
-    button, column, dropdown, row, scrollable, settings, text, text_input, toggler,
-};
-use cosmic::Element;
+use crate::prelude::*;
 use ursine_api::ScannerConfigView;
 
-use crate::app::Message;
 use crate::package_ui::{text_row, ConfirmVm};
 
 #[derive(Default)]
@@ -31,31 +25,16 @@ impl ScannersState {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let mut items: Vec<Element<'_, Message>> = vec![row(vec![
-            text::title2("Scanners").into(),
-            text("").width(Length::Fill).into(),
-            button::text("Refresh")
-                .on_press_maybe(
-                    (!self.busy && !self.action_busy).then_some(Message::RefreshScanners),
-                )
-                .into(),
-        ])
-        .spacing(12)
-        .width(Length::Fill)
-        .into()];
-
-        if let Some(error) = &self.error {
-            items.push(selectable_text(error.clone()).into());
-        }
-        if let Some(message) = &self.message {
-            items.push(text("Saved.").into());
-            let _ = message;
-        }
-        if self.busy {
-            items.push(text("Discovering scanners…").into());
-        } else if self.action_busy {
-            items.push(text("Writing airscan config…").into());
-        }
+        let mut items = vec![ui::header(
+            "Scanners",
+            (!self.busy && !self.action_busy).then_some(Message::RefreshScanners),
+        )];
+        items.extend(ui::status(
+            self.error.as_ref(),
+            self.message.as_ref().map(|_| "Saved."),
+            self.busy.then_some("Discovering scanners…"),
+            self.action_busy.then_some("Writing airscan config…"),
+        ));
 
         if let Some(view) = &self.view {
             items.push(

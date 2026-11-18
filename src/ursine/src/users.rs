@@ -1,12 +1,8 @@
 //! Users screen: passwd listing and root group/password actions.
 
-use cosmic::iced::Length;
-use cosmic::widget::selectable_text;
-use cosmic::widget::{button, column, row, scrollable, settings, text, text_input, toggler};
-use cosmic::Element;
+use crate::prelude::*;
 use ursine_api::UserSummary;
 
-use crate::app::Message;
 use crate::package_ui::{text_row, ConfirmVm};
 
 #[derive(Default)]
@@ -58,28 +54,16 @@ impl UsersState {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let mut items: Vec<Element<'_, Message>> = vec![row(vec![
-            text::title2("Users").into(),
-            text("").width(Length::Fill).into(),
-            button::text("Refresh")
-                .on_press_maybe((!self.busy && !self.action_busy).then_some(Message::RefreshUsers))
-                .into(),
-        ])
-        .spacing(12)
-        .width(Length::Fill)
-        .into()];
-
-        if let Some(error) = &self.error {
-            items.push(selectable_text(error.clone()).into());
-        }
-        if let Some(message) = &self.message {
-            items.push(text(message.clone()).into());
-        }
-        if self.busy {
-            items.push(text("Reading accounts…").into());
-        } else if self.action_busy {
-            items.push(text("Running user action…").into());
-        }
+        let mut items = vec![ui::header(
+            "Users",
+            (!self.busy && !self.action_busy).then_some(Message::RefreshUsers),
+        )];
+        items.extend(ui::status(
+            self.error.as_ref(),
+            self.message.as_deref(),
+            self.busy.then_some("Reading accounts…"),
+            self.action_busy.then_some("Running user action…"),
+        ));
 
         items.push(
             settings::section()

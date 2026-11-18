@@ -22,7 +22,7 @@ FeralOS ships a hardened musl-based desktop (niri + Wayle shell) but has no cont
 - btrbk snapshot GUI: list, stats, create, config init, restore preview+confirm. No rollback/retention editor yet (setConfig deferred).
 - No niri config GUI (config.kdl has no editor anywhere).
 
-Standalone tools exist (system-config-printer, blueman, nm-applet, firewalld-gui, simple-scan, gnome-disk-utility) — they remain usable fallbacks, but Ursine will cover all these areas natively via the daemons' own D-Bus/CLI interfaces, capability-gated, so the user has ONE product instead of a pile of apps.
+Standalone tools exist (system-config-printer, blueman, nm-applet, firewalld-gui, simple-scan, gnome-disk-utility) — they remain usable fallbacks, but Ursine will cover all these areas natively via system CLIs and system files (never D-Bus), capability-gated, so the user has ONE product instead of a pile of apps.
 
 ## Solution
 
@@ -36,7 +36,7 @@ Single backend, thin frontends:
 Key choices (full rationale in `docs/architecture/overview.md`):
 
 - Rust for everything (GUI = libcosmic/iced, Rust UI; shared serde types make a second backend language a liability). Web frontend must also be memory-safe.
-- No polkit. Auth = PAM handshake once per session (desktop GUI and web login), then Bearer session token. Web will move to OIDC (JWT validated against IdP) without touching the API.
+- No polkit. Auth = shadow handshake once per session (verify user+password against `/etc/shadow` in-process, no PAM, no C dependencies), then Bearer session token. Web will move to OIDC (JWT validated against IdP) without touching the API.
 - No database. Audit log = JSONL + logrotate. Config = `/etc/ursine/config.toml`.
 - Features auto-detect the machine at runtime (`"auto" | true | false` per module); compile-time cargo features trim the binary (web/OIDC optional).
 
@@ -46,7 +46,7 @@ Key choices (full rationale in `docs/architecture/overview.md`):
 |--------|--------|-----|
 | Daemon idle footprint | ~3-6 MB RSS, 0% CPU (event-driven, no polling) | `bottom` / RSS sampling |
 | Nix support | install/remove/search/list via GUI and web — unique among distros | manual test |
-| Memory safety | 100% memory-safe userland (Rust), no C in our code | cargo audit, code review |
+| Memory safety | 100% memory-safe userland (Rust), no C in our code | `cargo deny` + `cargo geiger`, code review |
 
 ## Risks
 

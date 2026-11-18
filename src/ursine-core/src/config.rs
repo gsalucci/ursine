@@ -27,13 +27,9 @@ pub fn load(path: &Path) -> Result<UrsineConfig, CoreError> {
     Ok(cfg)
 }
 
-/// Reject a config we must not trust before reading it. The daemon starts as
-/// root and this file controls module gating, so a user-writable or symlinked
-/// file would be a local privilege boundary violation.
-fn validate_config_read(path: &Path) -> Result<(), CoreError> {
-    const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
-    let meta = std::fs::symlink_metadata(path)
-        .map_err(|e| CoreError::config(format!("inspect {}: {e}", path.display())))?;
+/// A config file must be a regular, root-owned file that users cannot
+/// rewrite: the daemon runs as root and this file controls module gating.
+fn validate_config_meta(path: &Path, meta: &std::fs::Metadata) -> Result<(), CoreError> {
     if meta.file_type().is_symlink() || !meta.is_file() {
         return Err(CoreError::config(format!(
             "configuration path is not a regular file: {}",
@@ -54,6 +50,17 @@ fn validate_config_read(path: &Path) -> Result<(), CoreError> {
             path.display()
         )));
     }
+    Ok(())
+}
+
+/// Reject a config we must not trust before reading it. The daemon starts as
+/// root and this file controls module gating, so a user-writable or symlinked
+/// file would be a local privilege boundary violation.
+fn validate_config_read(path: &Path) -> Result<(), CoreError> {
+    const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
+    let meta = std::fs::symlink_metadata(path)
+        .map_err(|e| CoreError::config(format!("inspect {}: {e}", path.display())))?;
+    validate_config_meta(path, &meta)?;
     if meta.len() > MAX_CONFIG_BYTES {
         return Err(CoreError::config(format!(
             "configuration file is larger than {} bytes: {}",
@@ -236,27 +243,7 @@ fn validate_config_target(path: &Path) -> Result<(), CoreError> {
     let Ok(meta) = std::fs::symlink_metadata(path) else {
         return Ok(());
     };
-    if meta.file_type().is_symlink() || !meta.is_file() {
-        return Err(CoreError::config(format!(
-            "configuration path is not a regular file: {}",
-            path.display()
-        )));
-    }
-    #[cfg(unix)]
-    if meta.permissions().mode() & 0o022 != 0 {
-        return Err(CoreError::config(format!(
-            "configuration file is group/world-writable: {}",
-            path.display()
-        )));
-    }
-    #[cfg(unix)]
-    if meta.uid() != 0 {
-        return Err(CoreError::config(format!(
-            "configuration file is not root-owned: {}",
-            path.display()
-        )));
-    }
-    Ok(())
+    validate_config_meta(path, &meta)
 }
 
 /// Unique `create_new` temp path: never follows a pre-planted symlink.

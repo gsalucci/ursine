@@ -11,6 +11,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use saphyr::{LoadableYamlNode, Yaml};
 use serde_json::json;
 use ursine_api::{
     Action, ApiError, BoosterConfig, BoosterConfigPatch, BoosterRegenerateReport, CommandOutcome,
@@ -101,9 +102,12 @@ async fn config_set(patch: &BoosterConfigPatch, copies: usize) -> Result<Booster
         // complete result, then replace atomically. One writer at a time.
         let _guard = SET_LOCK.lock().await;
         crate::backup_configs::rotate_async(PathBuf::from(BOOSTER_YAML), copies, None).await?;
-        serde_yaml::from_str::<serde_yaml::Mapping>(&next)
+        let docs = Yaml::load_from_str(&next)
             .map_err(|e| ApiError::invalid(format!("resulting YAML invalid: {e}")))?;
-        write_atomic(Path::new(BOOSTER_YAML), &next)?;
+        if !docs.first().is_some_and(Yaml::is_mapping) {
+            return Err(ApiError::invalid("resulting YAML is not a mapping"));
+        }
+        crate::atomic::write(Path::new(BOOSTER_YAML), &next)?;
     }
     config_get()
 }
@@ -406,13 +410,26 @@ fn upsert_top(lines: &mut Vec<String>, key: &str, value: &str) {
     lines.push(format!("{key}: {value}"));
 }
 
-fn upsert_network(lines: &mut Vec<String>, key: &str, value: &str) {
-    let Some(start) = lines.iter().position(|line| {
+/// Locate the top-level `network:` block: line index of its header plus one
+/// past its last line. `None` when the file has no such block.
+fn network_block(lines: &[String]) -> Option<(usize, usize)> {
+    let start = lines.iter().position(|line| {
         is_top_level(line)
             && line_entry(line).is_some_and(|(k, rest)| {
                 k == "network" && (rest.trim().is_empty() || rest.trim().starts_with('#'))
             })
-    }) else {
+    })?;
+    let end = lines
+        .iter()
+        .enumerate()
+        .skip(start + 1)
+        .find(|(_, line)| !line.trim().is_empty() && is_top_level(line) && !is_comment(line))
+        .map_or(lines.len(), |(index, _)| index);
+    Some((start, end))
+}
+
+fn upsert_network(lines: &mut Vec<String>, key: &str, value: &str) {
+    let Some((start, end)) = network_block(lines) else {
         if !lines.is_empty() && lines.last().is_some_and(|l| !l.trim().is_empty()) {
             lines.push(String::new());
         }
@@ -420,12 +437,6 @@ fn upsert_network(lines: &mut Vec<String>, key: &str, value: &str) {
         lines.push(format!("  {key}: {value}"));
         return;
     };
-    let end = lines
-        .iter()
-        .enumerate()
-        .skip(start + 1)
-        .find(|(_, line)| !line.trim().is_empty() && is_top_level(line) && !is_comment(line))
-        .map_or(lines.len(), |(index, _)| index);
     if let Some(section) = lines.get_mut(start + 1..end) {
         for line in section {
             if line_entry(line).is_some_and(|(k, _)| k == key) {
@@ -445,20 +456,9 @@ fn remove_top(lines: &mut Vec<String>, key: &str) {
 }
 
 fn remove_network(lines: &mut Vec<String>, key: &str) {
-    let Some(start) = lines.iter().position(|line| {
-        is_top_level(line)
-            && line_entry(line).is_some_and(|(k, rest)| {
-                k == "network" && (rest.trim().is_empty() || rest.trim().starts_with('#'))
-            })
-    }) else {
+    let Some((start, end)) = network_block(lines) else {
         return;
     };
-    let end = lines
-        .iter()
-        .enumerate()
-        .skip(start + 1)
-        .find(|(_, line)| !line.trim().is_empty() && is_top_level(line) && !is_comment(line))
-        .map_or(lines.len(), |(index, _)| index);
     let mut index = start + 1;
     while index < end.min(lines.len()) {
         let matched = lines
@@ -470,26 +470,6 @@ fn remove_network(lines: &mut Vec<String>, key: &str) {
         }
         index += 1;
     }
-}
-
-fn write_atomic(path: &Path, text: &str) -> Result<(), ApiError> {
-    use std::os::unix::fs::PermissionsExt;
-    // Pid-unique temp name: a stale file from another process never collides.
-    let tmp = path.with_extension(format!("ursine-new.{}", std::process::id()));
-    let cleanup = |error: ApiError| -> ApiError {
-        let _ = std::fs::remove_file(&tmp);
-        error
-    };
-    std::fs::write(&tmp, text)
-        .map_err(|e| cleanup(ApiError::internal(format!("write {}: {e}", tmp.display()))))?;
-    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o644))
-        .map_err(|e| cleanup(ApiError::internal(format!("chmod {}: {e}", tmp.display()))))?;
-    std::fs::rename(&tmp, path).map_err(|e| {
-        cleanup(ApiError::internal(format!(
-            "replace {}: {e}",
-            path.display()
-        )))
-    })
 }
 
 /// Serializes config writes inside this daemon (one rotation+replace at
@@ -518,7 +498,7 @@ impl Step {
 /// Same selection the regenerate action executes: the preview shown in
 /// the confirm dialog cannot drift from the run.
 async fn select_step() -> Step {
-    if let Some(apk) = find(&crate::modules::packages_apk::APK_CANDIDATES) {
+    if let Some(apk) = crate::tooling::find(&crate::modules::packages_apk::APK_CANDIDATES) {
         if hooks_present() && kernel_hooks_installed(apk).await {
             return Step::KernelHooks(apk);
         }
@@ -545,7 +525,7 @@ async fn regenerate() -> Result<BoosterRegenerateReport, ApiError> {
         // 2b — direct booster build, one image per installed kernel.
         Step::DirectBuild => {}
     }
-    let booster = find(&BOOSTER)
+    let booster = crate::tooling::find(&BOOSTER)
         .ok_or_else(|| ApiError::unavailable("booster is not installed", "apk add booster"))?;
     let kernels = installed_kernels()?;
     let mut combined = String::new();
@@ -648,13 +628,6 @@ fn append_output(combined: &mut String, out: &CommandOutcome) {
     }
 }
 
-fn find(candidates: &[&'static str]) -> Option<&'static str> {
-    candidates
-        .iter()
-        .find(|path| Path::new(path).is_file())
-        .copied()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -716,8 +689,8 @@ mod tests {
         let next = apply("", &patch).unwrap();
         assert!(next.contains("vconsole: true"));
         assert!(next.contains("network:\n  ip: 10.0.2.15/24"));
-        let value: serde_yaml::Value = serde_yaml::from_str(&next).unwrap();
-        assert!(value.is_mapping());
+        let docs = Yaml::load_from_str(&next).unwrap();
+        assert!(docs.first().is_some_and(Yaml::is_mapping));
     }
 
     #[test]

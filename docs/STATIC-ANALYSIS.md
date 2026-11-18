@@ -1,9 +1,10 @@
 # Static analysis policy
 
 Binding. Every rule below runs in CI and locally through
-`scripts/static-check.sh` (container `ursine-static:1`). A finding is not
+`scripts/static-check.sh` (single image `ursine-ci:1`). A finding is not
 waived without an entry in `docs/static-analysis-exceptions.md` with owner,
-reason and expiry (max 90 days).
+reason and expiry (max 90 days). No rule is report-only and no rule has a
+finding threshold that lets findings pass: zero findings, or the gate fails.
 
 ## Layers and gates
 
@@ -11,23 +12,34 @@ reason and expiry (max 90 days).
 |---|---|---|
 | Formatting | `cargo fmt --check` | blocking |
 | Rust lints | workspace `[lints]` + strict clippy | blocking, `-D warnings` |
+| Tests | `scripts/test-gate.sh` (single-pass clippy + full workspace suite) | blocking |
 | Docs | `cargo doc` with `RUSTDOCFLAGS=-D warnings` | blocking |
 | Repo lint | `typos`, `editorconfig-checker` | blocking |
 | Scripts | `shellcheck`, `shfmt` | blocking |
-| Nix | `statix`, `deadnix`, `alejandra --check` | blocking |
+| Nix | `statix`, `deadnix`, `alejandra --check` | blocking (Nix job) |
 | TOML | `taplo` | blocking |
-| Markdown | `markdownlint-cli2` (ursine-docs image) | blocking |
-| GitHub Actions | `actionlint` (local image), `zizmor` (official image, CI) | blocking |
+| Markdown | `markdownlint-cli2` | blocking |
+| GitHub Actions | `actionlint`, `zizmor` | blocking |
 | Code security | clippy strict + `gitleaks` + `cargo-geiger` | blocking |
 | Secrets | `gitleaks` full history | blocking |
-| Unsafe | `unsafe_code = forbid`; `cargo-geiger` (Alpine edge/testing) | blocking |
-| Advisories | `scripts/audit-threshold.sh` | warn 1–9, block ≥10 dependencies |
+| Unsafe | `unsafe_code = forbid`; `cargo-geiger` | blocking |
+| Advisories | `cargo deny check advisories` + `cargo audit` | blocking, zero unignored findings |
 | Licenses | `cargo-deny licenses` | blocking |
 | Sources/bans | `cargo-deny sources`, `bans` | blocking |
-| Supply chain | `cargo-deny` (licenses/bans/sources) + `cargo-audit` (advisories) | blocking |
 | Unused deps | `cargo-machete` | blocking |
 | SBOM | `cargo-cyclonedx` | artifact per release |
-| Duplicate crates | `cargo tree -d` | report only |
+| Source clones | `jscpd --min-tokens 50` (Rust + shell) | blocking, threshold 0 |
+| Duplicate crates | `cargo tree -d` report in the run directory | report (upstream-owned) |
+
+## No overlapping tests
+
+Every check runs exactly once per gate. CI must not execute the same test in
+two jobs or two steps, and the release build is not a second test run: a push
+either tests or packages, and a tag only packages the commit the push already
+tested. Overlap is fixed by deleting the redundant execution; a test is never
+deleted to save time. Removing a test is allowed only when it is a true
+duplicate — same assertion on the same surface — and the surviving test keeps
+the full coverage.
 
 ## Rust lint policy
 
@@ -51,31 +63,43 @@ allows without an exception entry.
 
 ## Duplicates
 
-Code and crate duplication are measured and reported, never gated:
-`artifacts/duplicates/cargo-tree-duplicates.txt`.
-Review quarterly.
+`scripts/duplicates-gate.sh` covers both surfaces:
+
+1. **Our source — blocking.** `jscpd` with `.jscpd.json`: `minTokens` 50,
+   formats `rust` and `shell`, `threshold` 0. Any clone fails the gate.
+   Refactor the code; never raise the threshold.
+2. **Dependency graph — report.** `cargo tree -d` is written to
+   `artifacts/container-dev/<timestamp>/duplicates/dependency-duplicates.txt`
+   and its count is printed. Every duplicate version comes from the pinned
+   libcosmic/iced graph (`png` 0.17 + 0.18, `xkbcommon` 0.7 + 0.8, …) and
+   cannot be aligned without an upstream release. A committed baseline is not
+   an option: it would be generated state in the repository and it would
+   legitimise versions we cannot remove.
 
 ## Tool pinning
 
-Tool versions are pinned in `ci/Containerfile.static` (cargo tools, shell
-linters) and in `ci.yml` (zizmor action and GitHub Actions SHAs). Upgrade them
-in a dedicated PR monthly, never silently. The Rust toolchain is pinned in
-`rust-toolchain.toml`; CI and local images must match it. `zizmor` is not built
-into the static image (a from-source build costs ~30 minutes); CI runs the
-official `zizmorcore/zizmor-action` image instead.
+Tool versions are pinned in `ci/Containerfile` (cargo tools, linters, jscpd,
+markdownlint-cli2) and in `ci.yml` (Nix image digest and GitHub Actions SHAs).
+Upgrade them in a dedicated PR monthly, never silently. The Rust toolchain is
+pinned in `rust-toolchain.toml`; CI and local images must match it.
 
 ## Container policy
 
 Ursine is not containerized and ships no container image. Container scanning
-therefore does not apply. Build/test isolation still uses the dev/static
-containers; those images are tooling, not deliverables.
+therefore does not apply. Build/test isolation still uses the single Alpine
+container; the Nix packaging job uses `nixos/nix`. Those images are tooling,
+not deliverables.
 
-## Advisory threshold
+## Advisories
 
-`cargo audit` reports every finding. The gate blocks only when **10 or more
-distinct dependencies** have a vulnerability, unmaintained or unsound finding;
-1–9 findings produce a warning and a JSON report in
-`artifacts/static/cargo-audit.json`. This is deliberate: a small upstream
-backlog stays visible, but it cannot grow silently into a large one. Every
-finding is triaged in `docs/static-analysis-exceptions.md`; lowering the
-threshold is a policy change, not a per-PR decision.
+Zero tolerance: `cargo deny check advisories` AND `cargo audit --deny warnings`
+must report no unignored finding. Vulnerability, yanked, unsound and
+unmaintained advisories all fail the gate. Two implementations over the same
+RustSec database: `cargo deny` reads its ignores from `deny.toml` (the single
+source of truth, target-filtered on the musl graph); `cargo audit` is not
+target-aware, so `scripts/static-check.sh` derives the same ignore flags from
+`deny.toml` and adds only the two Windows-only crates the musl build never
+compiles (`paste`, `pin-utils`). The allowed ignores name the upstream-pinned
+COSMIC/iced dependencies with an owner and expiry in
+`docs/static-analysis-exceptions.md`. Any new advisory fails CI; there is no
+count threshold.

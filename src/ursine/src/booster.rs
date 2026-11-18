@@ -1,14 +1,10 @@
 //! Booster screen (SPEC-booster): surgical `/etc/booster.yaml` editing
 //! plus the regenerate button that runs the distro's kernel hooks.
 
-use cosmic::iced::Length;
-use cosmic::widget::selectable_text;
+use crate::prelude::*;
 use cosmic::widget::text::monotext;
-use cosmic::widget::{button, column, row, scrollable, text, text_input};
-use cosmic::Element;
 use ursine_api::{BoosterConfig, BoosterConfigPatch};
 
-use crate::app::Message;
 use crate::package_ui::{text_row, ConfirmVm};
 
 /// One editable key: wire name (also the `clear` entry) + label.
@@ -158,23 +154,16 @@ impl BoosterState {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let mut items: Vec<Element<'_, Message>> = vec![row(vec![
-            text::title2("Booster (initramfs)").into(),
-            text("").width(Length::Fill).into(),
-            button::text("Refresh")
-                .on_press_maybe((!self.busy && !self.action_busy).then_some(Message::OpenBooster))
-                .into(),
-        ])
-        .spacing(12)
-        .width(Length::Fill)
-        .into()];
-
-        if let Some(error) = &self.error {
-            items.push(selectable_text(error.clone()).into());
-        }
-        if let Some(message) = &self.message {
-            items.push(text(message.clone()).into());
-        }
+        let mut items = vec![ui::header(
+            "Booster (initramfs)",
+            (!self.busy && !self.action_busy).then_some(Message::OpenBooster),
+        )];
+        items.extend(ui::status(
+            self.error.as_ref(),
+            self.message.as_deref(),
+            None,
+            None,
+        ));
         if self.busy {
             items.push(text("Reading /etc/booster.yaml…").into());
             return scrollable(column(items).spacing(16).padding(24)).into();

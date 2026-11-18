@@ -50,9 +50,9 @@ nix flake check
 ```text
 flake.nix                  package chain: ursine -> ursined -> ursine-activate
 flake.lock
-.github/workflows/ci.yml   test gate + flake + release (installer smoke test)
+.github/workflows/ci.yml   verify (build/tests/static/docs/release) + nix packaging
 .cargo/config.toml         target-dir = "artifacts/target" + musl dynamic default (release statics opt in via target rustflags)
-ci/Containerfile.dev       dev/CI image: rust:1-alpine + clippy/rustfmt
+ci/Containerfile           the ONE CI/dev image: Rust toolchain, GUI deps, analysers, jscpd, markdownlint
 src/tools/ursine-activate.sh Nix profile activation: init detection, root-owned daemon copy, unit render, restart
 src/tools/ursine-deactivate.sh Nix profile deactivation: stop/disable, remove unit files
 scripts/clean-artifacts.sh keep LAST 3 nix out-links + nix-collect-garbage (-d); --all = + cargo clean
@@ -75,7 +75,7 @@ Run `scripts/clean-artifacts.sh` after builds or whenever disk is tight
 ## Code Style
 
 - Workflow YAML: one job per concern, `fail-fast: false`, concurrency cancel on branch
-- flake.nix: `stdenvNoCC` package over the pinned release artifact; outputs: `packages.x86_64-linux.ursine`, default package; `devShells` NOT promised (Docker is the dev env; use `nix/dev-flake.nix` for current-tree testing)
+- flake.nix: `stdenvNoCC` package over the pinned release artifact; outputs: `packages.x86_64-linux.ursine`, default package; `devShells` NOT promised (Docker is the dev env; published-release acceptance on the host runs only through `scripts/test-host.sh`, which installs the GitHub flake and never reads the repository — see AGENTS.md host isolation)
 
 ## Testing Strategy
 

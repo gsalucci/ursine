@@ -1,7 +1,7 @@
 //! btrbk raw-output parsing and root execution.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use ursine_api::{ApiError, Snapshot, SnapshotStats};
@@ -24,13 +24,7 @@ const BTRFS_CANDIDATES: [&str; 4] = [
 ];
 
 fn trusted_path(candidates: &[&'static str], label: &str) -> Result<&'static str, ApiError> {
-    candidates
-        .iter()
-        .find(|path| Path::new(path).is_file())
-        .copied()
-        .ok_or_else(|| {
-            ApiError::unavailable(format!("{label} not found"), format!("install {label}"))
-        })
+    crate::tooling::resolve(candidates, label, &format!("install {label}"))
 }
 
 pub(super) fn btrbk_path() -> Result<&'static str, ApiError> {

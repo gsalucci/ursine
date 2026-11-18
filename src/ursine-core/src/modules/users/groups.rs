@@ -197,6 +197,16 @@ pub(super) fn memberships_from(raw: &str, user: &str) -> Vec<String> {
         .collect()
 }
 
+/// A group name is a short token that cannot be read as a command option.
+fn valid_group_name(group: &str) -> bool {
+    !group.is_empty()
+        && group.len() <= 32
+        && !group.starts_with('-')
+        && group
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+}
+
 pub(super) fn list_groups() -> Result<Vec<String>, ApiError> {
     let raw = std::fs::read_to_string("/etc/group")
         .map_err(|e| ApiError::internal(format!("read /etc/group: {e}")))?;
@@ -208,14 +218,7 @@ pub(super) async fn set_groups(user: &str, groups: &[String]) -> Result<(), ApiE
     let known = list_groups()?;
     let mut unique = Vec::new();
     for group in groups {
-        if group.is_empty()
-            || group.len() > 32
-            || group.starts_with('-')
-            || !group
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
-            || !known.iter().any(|known| known == group)
-        {
+        if !valid_group_name(group) || !known.iter().any(|known| known == group) {
             return Err(ApiError::invalid(format!(
                 "unknown or invalid group: {group}"
             )));
@@ -231,13 +234,7 @@ pub(super) async fn set_groups(user: &str, groups: &[String]) -> Result<(), ApiE
 }
 
 pub(super) fn ensure_known_group(group: &str) -> Result<(), ApiError> {
-    if group.is_empty()
-        || group.len() > 32
-        || group.starts_with('-')
-        || !group
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
-    {
+    if !valid_group_name(group) {
         return Err(ApiError::invalid("invalid group name"));
     }
     if !list_groups()?.iter().any(|known| known == group) {

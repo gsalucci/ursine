@@ -6,6 +6,19 @@
 See `state/session-state.json` for current goals, decisions, risks, and next actions.
 See `AGENTS.md` for project context and milestone history.
 
+## Session 2026-11-18 — binding gates at max severity, artifacts layout, host acceptance (uncommitted)
+
+**Status**: uncommitted on top of `4d6265c`. `scripts/dev.sh check` green (fmt + 515 tests, single clippy pass), `scripts/dev.sh verify` green (static all + docs + release + installer smoke), Nix lint/eval green (`0.39.1`), jscpd **0 clones**. Nothing pushed.
+
+- **All gates binding**: `scripts/static-check.sh` fails when a tool is missing (no skips); jscpd 50 tokens threshold 0 on Rust + shell; advisories zero-tolerance via `cargo deny` + `cargo audit` (ignores only in `deny.toml` + documented exceptions). `ci/duplicates-baseline.txt` deleted — generated state is never committed; `cargo tree -d` writes a report into the run dir (90 duplicate crate versions, all from the pinned libcosmic/iced graph).
+- **Artifacts layout**: `scripts/run-dir.sh` creates and prunes `artifacts/container-dev/<UTC timestamp>/` (newest 10); static, duplicates, release, package and smoke trees all write there; `URSINE_RUN_DIR` is forwarded so nested gates share one directory; CI sets it per run. No `.gitkeep`, no `container dev` spaces.
+- **One image, two jobs**: `ci/Containerfile` → `ursine-ci:1`; `verify` runs every check on push/PR and builds/publishes only on a tag; `nix` runs lint+eval on PR/main and the tarball integrity smoke + pin on a tag. A push never builds artifacts; a tag never re-runs checks.
+- **Dedupe 42 → 0 clones with real shared code**: `tooling::blocking`, `logs::tail_chunk`, `config_meta`, `session::live`, `jobs::run_worker`, `exec::{regex_noop,compile_regex,validate_search_query}`, apk/flatpak `start_regex_job` + `list_kind`, `booster_struct!`, `network_block`, `config_dir`, `write_failure`/`push_block`/`push_section`, `modules::prelude`, `Daemon::assemble`, the theme fixture and e2e helpers (`ok`, `json_ok`, `assert_root_gate`, `set_crontab_switch`, `assert_module_disabled`). No threshold change, no detector gaming.
+- **Host acceptance replaces the dev path**: `scripts/build-gui-dev.sh` and `nix/dev-flake.nix` deleted — they ran `nix run` on the host and violated the container-only rule. `scripts/test-host.sh` is the single allowed host interaction and runs **after the tag** without touching the repository: ensure the `flake:ursine` registry entry, `nix flake metadata --refresh` + `nix eval --refresh` for the published version, install/upgrade the published GitHub flake (reinstall when the version differs), `sudo ursine-activate`, then check `auth: shadow`, the live service and `ursinectl system status`.
+- **Fixes found by the gate**: GUI compile set (`pub(crate) use crate::ui`, `logs` container import, Bluetooth Scan button via `ui::header_with`), `elidable_lifetime_names` in `ui::header`, `redundant_pub_crate` allows on the private tooling/atomic/prelude modules, `Daemon::assemble` wiring for both binaries.
+
+Next: after the next tag is published, the user runs `scripts/test-host.sh`; then the commit (conventional split) when instructed.
+
 ## Session 2026-11-17 — CI pipeline split + single-pass gate, release 0.39.1 (main, tag `v0.39.1`)
 
 **Status**: Pushed through `52777bd` + tag `v0.39.1`; push CI `44095649999`/`44100041869` success (no `package` job — verified); tag CI `44104078121` success (checks skipped, `package`+`publish` green — verified); auto-pin `6519964` pulled, HEAD `6519964`.
@@ -162,7 +175,7 @@ See `AGENTS.md` for project context and milestone history.
 
 **Status**: DONE — `3fddaf0` CI-green. Printers screen subscribes to a 3 s tick while visible; the silent load path avoids the busy flicker, never clears a persistent error before the reply, and may overlap an in-flight read so a finished mutation's reload is never dropped (newer reply wins). Review: 3 medium fixed. TASKS Printers line ticked.
 
-- **This was the last required v2 code item.** Remaining v1.0 closure work is user/VM-side: APKBUILDs in `feralos-aports`, real FeralOS PAM/activation/module smoke, then the v1.0 tag.
+- **This was the last required v2 code item.** Remaining v1.0 closure work is user/VM-side: APKBUILDs in `feralos-aports`, real FeralOS activation/module smoke, then the v1.0 tag.
 - VM smokes pending for this week's features: flatpak override write path (get/set + Session Bus policy survives), firewall toggle + test service, disks loop-device format/partition with `disks_format=true`, bluetooth legacy-PIN + numeric pairing, printer live refresh.
 
 ## Session 2026-11-06 — Bluetooth pairing agent complete (main, 1 commit)

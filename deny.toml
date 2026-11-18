@@ -84,6 +84,10 @@ expression = "MIT"
 license-files = []
 
 [bans]
+# Dependency duplicates are gated by scripts/duplicates-gate.sh: `cargo tree -d`
+# must match ci/duplicates-baseline.txt exactly (ratchet, cannot grow). That
+# gate is stricter than a per-crate skip list, so cargo-deny leaves the generic
+# check to it.
 multiple-versions = "allow"
 wildcards = "deny"
 

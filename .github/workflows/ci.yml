@@ -1,26 +1,25 @@
-# Ursine CI — fully containerized (rule 9): no host toolchains on runners.
+# Ursine CI — two jobs, linear by design.
 #
-# Jobs: image · test (single-pass clippy+tests, same script as local) ·
-#       lint (fmt+rustdoc) · analyzer (repo/sast/deps/duplicates/sbom) ·
-#       docs · zizmor · version + changes (release/path gates) ·
-#       package (static release binaries, tag only) ·
-#       publish (waits for test/lint/analyzer/docs) ·
-#       flake (PR/main only, when Nix inputs changed) ·
-#       verify-pin (post-tag Nix build on main).
+#   verify  ONE job, ONE image (ci/Containerfile → ursine-ci): build, code
+#           tests, functional tests, static analysis, docs, release binary.
+#           Push/PR: everything runs, the binary is verified and DISCARDED.
+#           Tag: tests are skipped (already run on the push that created the
+#           commit); only the release binary is built and published.
+#   nix     nixos/nix container, no build and no tests: PR/main Nix lint +
+#           flake evaluation; tag receives the published tarball, runs a fast
+#           integrity smoke, pins nix/binary.nix and attaches the flake source.
 #
-# Cargo caches are restore-only from untrusted refs; only main may save.
-# The release package path is deliberately uncached.
-# Static analysis policy: docs/STATIC-ANALYSIS.md. Canonical commands:
+# Host isolation: no toolchain on the runner; every command runs in a
+# container. Cargo caches are restore-only from untrusted refs; only main may
+# save. Static analysis policy: docs/STATIC-ANALYSIS.md. Canonical commands:
 # docs/guides/build-and-test.md.
 #
 # Why binaries are built in Alpine, not Nix: nixpkgs does not cache musl
-# toolchains (stable included) — a source build takes hours. Alpine IS musl and
-# builds in ~1 min. The flake packages the pinned release artifact
-# (nix/binary.nix, reproducible URL+sha256). Since the shadow-auth switch the
-# daemon and CLI build FULLY STATIC (no C dependencies); the GUI stays dynamic
-# (Alpine ships no libxkbcommon.a — every desktop provides it).
-#
-# Layout/spec reference: docs/specs/SPEC-packaging-infra.md
+# toolchains — a source build takes hours. Alpine IS musl and builds in ~1 min.
+# The flake packages the pinned release artifact (nix/binary.nix, reproducible
+# URL+sha256). Since the shadow-auth switch the daemon and CLI build FULLY
+# STATIC (no C dependencies); the GUI stays dynamic (Alpine ships no
+# libxkbcommon.a — every desktop provides it).
 
 name: CI
 
@@ -30,11 +29,6 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
-    inputs:
-      force_package:
-        description: Build the release package even when the version is already tagged
-        type: boolean
-        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -42,620 +36,221 @@ concurrency:
 
 permissions:
   contents: read
-  packages: read
 
 env:
   CARGO_TERM_COLOR: never
   CARGO_INCREMENTAL: "0"
   NIX_CONFIG: "experimental-features = nix-command flakes"
+  CI_IMAGE: ursine-ci:ci
+  NIX_IMAGE: nixos/nix@sha256:62c506c32c75395163676006f0c00d75c31578fffaac1167d600289f72477b78
 
 jobs:
-  # ── Dev/CI image: built once, used by build/test/lint/package ──
-  image:
+  verify:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v3
-      - uses: docker/login-action@d3b9cdfa580156c018ca5e745c1bf653d8ea46b5 # v3
-        if: github.event_name != 'pull_request'
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v6
-        with:
-          context: .
-          file: ci/Containerfile.dev
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/ursine-ci:main
-            ghcr.io/${{ github.repository_owner }}/ursine-ci:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # ── Test gate: ONE job, same script as `scripts/dev.sh check` ──
-  test:
-    runs-on: ubuntu-latest
-    needs: image
-    # Tags reuse the checks of the push that created them (no redundancy).
-    if: github.ref_type != 'tag'
-    container:
-      image: ghcr.io/${{ github.repository_owner }}/ursine-ci:main
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            artifacts/cargo-home/registry/index
-            artifacts/cargo-home/registry/cache
-            artifacts/cargo-home/git/db
-            artifacts/target
-          key: cargo-test-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'ci/Containerfile.dev') }}
-          restore-keys: |
-            cargo-test-
-      - name: Test (single pass — clippy lints + all tests)
-        # scripts/test-gate.sh is the single source of truth shared with
-        # `scripts/dev.sh check`: same command, single-pass clippy-driver
-        # wrapper, same RUST_MIN_STACK.
-        run: sh scripts/test-gate.sh
-      - name: Save Cargo cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        continue-on-error: true
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            artifacts/cargo-home/registry/index
-            artifacts/cargo-home/registry/cache
-            artifacts/cargo-home/git/db
-            artifacts/target
-          key: cargo-test-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'ci/Containerfile.dev') }}
-
-  # ── Format + rustdoc gate (clippy rides the test job: one pass) ──
-  lint:
-    runs-on: ubuntu-latest
-    needs: image
-    if: github.ref_type != 'tag'
-    container:
-      image: ghcr.io/${{ github.repository_owner }}/ursine-ci:main
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            artifacts/cargo-home/registry/index
-            artifacts/cargo-home/registry/cache
-            artifacts/cargo-home/git/db
-            artifacts/target
-          key: cargo-lint-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'ci/Containerfile.dev') }}
-          restore-keys: |
-            cargo-lint-
-      - run: cargo fmt --check
-      - name: Rustdoc warnings are errors
-        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
-      - name: Save Cargo cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        continue-on-error: true
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            artifacts/cargo-home/registry/index
-            artifacts/cargo-home/registry/cache
-            artifacts/cargo-home/git/db
-            artifacts/target
-          key: cargo-lint-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'ci/Containerfile.dev') }}
-
-  # ── Static analysis: same image and script as local (docs/STATIC-ANALYSIS.md) ──
-  analyzer:
-    runs-on: ubuntu-latest
-    if: github.ref_type != 'tag'
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            artifacts/cargo-home/registry/index
-            artifacts/cargo-home/registry/cache
-            artifacts/cargo-home/git/db
-            artifacts/target
-          key: cargo-analyzer-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'ci/Containerfile.static') }}
-          restore-keys: |
-            cargo-analyzer-
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v3
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v6
-        with:
-          context: .
-          file: ci/Containerfile.static
-          tags: ursine-static:ci
-          load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      - name: Static checks
-        run: |
-          for group in repo sast deps duplicates sbom; do
-            echo "== static-check: $group =="
-            docker run --rm -v "$PWD:/work" -w /work \
-              -e CARGO_HOME=/work/artifacts/cargo-home \
-              ursine-static:ci sh scripts/static-check.sh "$group"
-          done
-      - name: Save analyzer Cargo cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        continue-on-error: true
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            artifacts/cargo-home/registry/index
-            artifacts/cargo-home/registry/cache
-            artifacts/cargo-home/git/db
-            artifacts/target
-          key: cargo-analyzer-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'ci/Containerfile.static') }}
-
-  # ── Documentation lint: same image and script as local ──
-  docs:
-    runs-on: ubuntu-latest
-    if: github.ref_type != 'tag'
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v3
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v6
-        with:
-          context: .
-          file: ci/Containerfile.docs
-          tags: ursine-docs:ci
-          load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      - name: Markdown lint
-        run: docker run --rm -v "$PWD:/work" -w /work ursine-docs:ci sh scripts/docs-check.sh
-
-  # ── GitHub Actions security (unpinned uses, injection, permissions) ──
-  zizmor:
-    runs-on: ubuntu-latest
-    if: github.ref_type != 'tag'
-    permissions:
-      contents: read
-      security-events: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: zizmorcore/zizmor-action@fb1d87ba4b2f888025015a269a94ad7e991f6a7b # v0.3.0
-
-  # ── Release gate: build packages only for a new/tagged version ──
-  version:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      release: ${{ steps.version.outputs.release }}
+      contents: write # tag: create the release and upload the assets
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Resolve workspace version
-        id: version
+
+      - name: Resolve version and validate the tag
         shell: bash
-        env:
-          FORCE_PACKAGE: ${{ inputs.force_package }}
         run: |
           set -euo pipefail
           version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
           test -n "$version"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             test "$GITHUB_REF_NAME" = "v$version"
-            echo "release=true" >> "$GITHUB_OUTPUT"
-          elif [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$FORCE_PACKAGE" = "true" ]; then
-            echo "release=true" >> "$GITHUB_OUTPUT"
-          elif git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
-            echo "release=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "release=true" >> "$GITHUB_OUTPUT"
           fi
 
-  # ── PR path filter: package smoke only when build inputs change ──
-  changes:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-    outputs:
-      package: ${{ steps.filter.outputs.package }}
-      nix: ${{ steps.filter.outputs.nix }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v3
-        id: filter
-        if: github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/'))
-        with:
-          filters: |
-            package:
-              - 'src/**'
-              - 'Cargo.toml'
-              - 'Cargo.lock'
-              - 'packaging/**'
-              - 'install.sh'
-              - 'scripts/**'
-            nix:
-              - 'flake.nix'
-              - 'flake.lock'
-              - 'nix/**'
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v3
 
-  # ── Nix flake: PR/main when Nix inputs change; tags verify after publish ──
-  flake:
-    runs-on: ubuntu-latest
-    needs: [changes]
-    if: (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch')) && needs.changes.outputs.nix == 'true'
-    container:
-      image: nixos/nix@sha256:62c506c32c75395163676006f0c00d75c31578fffaac1167d600289f72477b78
-    steps:
-      # No JS actions in this image (runner node cannot exec here).
-      - run: |
-          git init repo && cd repo
-          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
-          git fetch --depth 1 origin "$GITHUB_SHA"
-          git checkout FETCH_HEAD
-          git config --global --add safe.directory "$GITHUB_WORKSPACE/repo"
-      - working-directory: repo
-        run: nix flake check
-      - working-directory: repo
-        run: nix build --out-link artifacts/result
-      - working-directory: repo
-        run: |
-          nix run nixpkgs#statix -- check flake.nix
-          nix run nixpkgs#statix -- check nix
-          nix run nixpkgs#deadnix -- --fail flake.nix nix
-          nix run nixpkgs#alejandra -- --check flake.nix nix
+      - name: Build the CI image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v6
+        with:
+          context: .
+          file: ci/Containerfile
+          tags: ursine-ci:ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-  # ── Package: release binaries start in parallel; publish is the quality gate ──
-  package:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    container:
-      image: ghcr.io/${{ github.repository_owner }}/ursine-ci:main
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    needs: [image, test, lint, version, changes]
-    # Artifacts are built only for a release tag (or a manual force /
-    # PR smoke): branch pushes never build release binaries.
-    # !cancelled() lets the job run on tags where the check jobs above
-    # are skipped by design.
-    if: ${{ !cancelled() && ((github.ref_type == 'tag' && needs.version.outputs.release == 'true') || (github.event_name == 'pull_request' && needs.changes.outputs.package == 'true') || (github.event_name == 'workflow_dispatch' && needs.version.outputs.release == 'true')) }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          persist-credentials: false
-      # No dependency cache in the release path: a poisoned cache could alter
-      # release artifacts. Builds are reproducible from Cargo.lock instead.
-      # gh invokes git; container ownership differs from the checkout dir owner.
-      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - name: Build release binaries (static daemon+CLI, dynamic GUI)
-        run: |
-          # ONE build per linkage class: the daemon and CLI are pure Rust
-          # since the shadow-auth switch → fully static. The GUI needs
-          # libxkbcommon (no .a in Alpine) → dynamic musl, like every
-          # desktop app. Host units (proc-macros) must NOT get +crt-static,
-          # hence the explicit --target with target-scoped rustflags.
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-C target-feature=+crt-static" \
-            cargo build --release --target x86_64-unknown-linux-musl \
-            -p ursined -p ursinectl --locked
-          cargo build --release -p ursine --locked
-          mkdir -p artifacts/pkg/bin
-          cp artifacts/target/x86_64-unknown-linux-musl/release/ursined \
-            artifacts/target/x86_64-unknown-linux-musl/release/ursinectl \
-            artifacts/pkg/bin/
-          cp artifacts/target/release/ursine artifacts/pkg/bin/
-          cp install.sh artifacts/pkg/
-          cp src/tools/ursine-activate.sh artifacts/pkg/bin/ursine-activate
-          cp src/tools/ursine-deactivate.sh artifacts/pkg/bin/ursine-deactivate
-          chmod 755 artifacts/pkg/bin/ursine-activate artifacts/pkg/bin/ursine-deactivate
-          cp -r packaging artifacts/pkg/
-          # Static contract: daemon + CLI must have ZERO dynamic deps.
-          # The GUI may only need the known desktop runtime libs.
-          fail=0
-          for b in ursined ursinectl; do
-            f="artifacts/target/x86_64-unknown-linux-musl/release/$b"
-            if readelf -d "$f" | grep -q NEEDED; then
-              echo "::error::$b is not static:"
-              readelf -d "$f" | grep NEEDED
-              fail=1
-            else
-              echo "$b: static OK"
-            fi
-          done
-          f="artifacts/target/release/ursine"
-          echo "ursine (GUI) dynamic deps:"
-          readelf -d "$f" | grep NEEDED
-          if readelf -d "$f" | grep NEEDED |
-            grep -Ev 'libxkbcommon\.so\.0|libgcc_s\.so\.1|libc\.musl-x86_64\.so\.1'; then
-            echo "::error::ursine (GUI) links an unexpected library"
-            fail=1
-          fi
-          if [ "$fail" -ne 0 ]; then
-            exit 1
-          fi
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            NAME="ursine-${GITHUB_REF_NAME}-x86_64-musl.tar.gz"
-          else
-            NAME="ursine-latest-x86_64-musl.tar.gz"
-          fi
-          tar czf "$NAME" -C artifacts/pkg .
-          sha256sum "$NAME" > "$NAME.sha256"
-          echo "ASSET=$NAME" >> "$GITHUB_ENV"
-          echo "CHECKSUM=$NAME.sha256" >> "$GITHUB_ENV"
-          tar tzf "$NAME"
-          cat "$NAME.sha256"
-      - name: Smoke-test release installer
-        run: |
-          sh -n install.sh
-          sh -n packaging/openrc/ursined
-          sh -n packaging/dinit/ursined.wrapper
-          mkdir -p artifacts/smoke
-          tar xzf "$ASSET" -C artifacts/smoke
-          test -x artifacts/smoke/bin/ursine-activate
-          test -x artifacts/smoke/bin/ursine-deactivate
-          sh -n artifacts/smoke/bin/ursine-activate
-          sh -n artifacts/smoke/bin/ursine-deactivate
-          for init in systemd openrc dinit; do
-            root="$PWD/artifacts/smoke/root-$init"
-            case "$init" in
-            systemd)
-              artifacts/smoke/install.sh --destdir "$root" --prefix /usr --init systemd --no-start
-              test -f "$root/etc/systemd/system/ursined.service"
-              ;;
-            openrc)
-              artifacts/smoke/install.sh --destdir "$root" --prefix /usr --init openrc --no-start
-              test -x "$root/etc/init.d/ursined"
-              ;;
-            dinit)
-              artifacts/smoke/install.sh --destdir "$root" --prefix /usr --init dinit \
-                --unitdir /lib/dinit.d --libexecdir /usr/lib --no-start
-              test -f "$root/lib/dinit.d/ursined"
-              test -x "$root/usr/lib/dinit/ursined"
-              test -f "$root/etc/dinit.d/config/ursined.conf"
-              ;;
-            esac
-            test -x "$root/usr/bin/ursine"
-            test -x "$root/usr/sbin/ursined"
-            test "$("$root/usr/sbin/ursined" --version | grep -c 'auth: shadow')" = "1"
-          done
-          root="$PWD/artifacts/smoke/install-dinit-default"
-          artifacts/smoke/install.sh --destdir "$root" --prefix /usr --init dinit --no-start
-          test -f "$root/lib/dinit.d/ursined"
-          test -x "$root/usr/lib/dinit/ursined"
-          test -f "$root/etc/dinit.d/config/ursined.conf"
-          root="$PWD/artifacts/smoke/install-dinit-auto"
-          URSINE_PID1_COMM=init URSINE_PID1_EXE=/sbin/dinit \
-            artifacts/smoke/install.sh --destdir "$root" --prefix /usr --no-start
-          test -f "$root/lib/dinit.d/ursined"
-          profile="$PWD/artifacts/smoke/profile"
-          mkdir -p "$profile"
-          cp -R artifacts/smoke/bin artifacts/smoke/packaging "$profile/"
-          for init in systemd openrc dinit; do
-            root="$PWD/artifacts/smoke/activate-$init"
-            artifacts/smoke/bin/ursine-activate --profile "$profile" --root "$root" --init "$init" --no-start
-            test -f "$root/usr/local/sbin/ursined"
-            test ! -L "$root/usr/local/sbin/ursined"
-            test "$(stat -c '%a' "$root/usr/local/sbin/ursined")" = "755"
-            case "$init" in
-            systemd)
-              test -f "$root/etc/systemd/system/ursined.service"
-              grep -Fq "/usr/local/sbin/ursined" "$root/etc/systemd/system/ursined.service"
-              ! grep -Fq "$profile" "$root/etc/systemd/system/ursined.service"
-              ;;
-            openrc)
-              test -x "$root/etc/init.d/ursined"
-              grep -Fq "/usr/local/sbin/ursined" "$root/etc/init.d/ursined"
-              ! grep -Fq "$profile" "$root/etc/init.d/ursined"
-              ;;
-            dinit)
-              test -f "$root/lib/dinit.d/ursined"
-              test -x "$root/usr/lib/dinit/ursined"
-              test -f "$root/etc/dinit.d/config/ursined.conf"
-              grep -Fq "/usr/local/sbin/ursined" "$root/usr/lib/dinit/ursined"
-              ! grep -Fq "$profile" "$root/usr/lib/dinit/ursined"
-              mkdir -p "$root/lib/dinit.d/boot.d" "$root/etc/dinit.d/boot.d"
-              ln -sfn ../ursined "$root/lib/dinit.d/boot.d/ursined"
-              ln -sfn ../ursined "$root/etc/dinit.d/boot.d/ursined"
-              ;;
-            esac
-          done
-          root="$PWD/artifacts/smoke/activate-auto-dinit"
-          mkdir -p "$root/etc/init.d" "$root/etc/dinit.d/boot.d" "$root/lib/dinit.d/boot.d"
-          printf '# Ursine control daemon\n' > "$root/etc/init.d/ursined"
-          printf '# Ursine control daemon\n' > "$root/etc/dinit.d/ursined"
-          printf '# Ursine control daemon\n' > "$root/lib/dinit.d/ursined"
-          ln -sfn ../ursined "$root/etc/dinit.d/boot.d/ursined"
-          ln -sfn ../ursined "$root/lib/dinit.d/boot.d/ursined"
-          URSINE_PID1_COMM=init URSINE_PID1_EXE=/sbin/dinit \
-            artifacts/smoke/bin/ursine-activate --profile "$profile" --root "$root" --no-start
-          URSINE_PID1_COMM=init URSINE_PID1_EXE=/sbin/dinit \
-            artifacts/smoke/bin/ursine-activate --profile "$profile" --root "$root" --no-start
-          test -f "$root/lib/dinit.d/ursined"
-          test ! -e "$root/etc/dinit.d/ursined"
-          test ! -e "$root/etc/init.d/ursined"
-          test ! -L "$root/etc/dinit.d/boot.d/ursined"
-          test ! -L "$root/lib/dinit.d/boot.d/ursined"
-          if artifacts/smoke/bin/ursine-activate --profile "$profile" --root / --no-start; then
-            echo "activation accepted --root /" >&2
-            exit 1
-          fi
-          for init in systemd openrc dinit; do
-            root="$PWD/artifacts/smoke/activate-$init"
-            artifacts/smoke/bin/ursine-deactivate --profile "$profile" --root "$root" --init "$init"
-            test ! -e "$root/usr/local/sbin/ursined"
-            case "$init" in
-            systemd) test ! -e "$root/etc/systemd/system/ursined.service" ;;
-            openrc) test ! -e "$root/etc/init.d/ursined" ;;
-            dinit)
-              test ! -e "$root/lib/dinit.d/ursined"
-              test ! -e "$root/etc/dinit.d/ursined"
-              test ! -e "$root/usr/lib/dinit/ursined"
-              test ! -e "$root/etc/dinit.d/config/ursined.conf"
-              test ! -L "$root/lib/dinit.d/boot.d/ursined"
-              test ! -L "$root/etc/dinit.d/boot.d/ursined"
-              ;;
-            esac
-          done
-      - name: Stage release assets
-        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-        run: |
-          mkdir -p artifacts/release
-          cp "$ASSET" "$CHECKSUM" artifacts/release/
-      - name: Upload release artifact
-        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ursine-release
-          path: artifacts/release
-          if-no-files-found: error
-          retention-days: 7
+          path: |
+            artifacts/cargo-home/registry/index
+            artifacts/cargo-home/registry/cache
+            artifacts/cargo-home/git/db
+            artifacts/target
+          key: cargo-verify-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'ci/Containerfile') }}
+          restore-keys: |
+            cargo-verify-
 
-  # ── Publish: quality gates + write token isolated from build code ──────────
-  publish:
-    runs-on: ubuntu-latest
-    needs: [package, test, lint, analyzer, docs, zizmor]
-    # Only a tag publishes (the checks already ran on its push).
-    if: ${{ !cancelled() && github.ref_type == 'tag' }}
-    permissions:
-      contents: write
-      actions: read
-    env:
-      GH_REPO: ${{ github.repository }}
-    steps:
-      # Checkout main explicitly: a tag build updates the release pin on main.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: main
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: ursine-release
-          path: artifacts/release
-      - name: Resolve asset names
+      - name: Open the artifact run directory
         run: |
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            NAME="ursine-${GITHUB_REF_NAME}-x86_64-musl.tar.gz"
-          else
-            NAME="ursine-latest-x86_64-musl.tar.gz"
-          fi
-          {
-            echo "ASSET=$NAME"
-            echo "CHECKSUM=$NAME.sha256"
-            echo "FLAKE_ASSET=ursine-flake-${GITHUB_REF_NAME}.tar.gz"
-          } >> "$GITHUB_ENV"
-      - name: Publish versioned tag release
-        if: startsWith(github.ref, 'refs/tags/v')
-        working-directory: artifacts/release
+          run=$(sh scripts/run-dir.sh)
+          test -n "$run"
+          echo "RUN_DIR=$run" >> "$GITHUB_ENV"
+
+      - name: Verify — build, tests, static, docs, release binary (push/PR)
+        if: github.ref_type != 'tag'
         run: |
-          sha256sum -c "$CHECKSUM"
+          docker run --rm --network=host -v "$PWD:/work" -w /work \
+            -e CARGO_HOME=/work/artifacts/cargo-home \
+            -e RUST_MIN_STACK=16777216 \
+            -e "URSINE_RUN_DIR=/work/$RUN_DIR" \
+            ursine-ci:ci sh scripts/verify.sh
+
+      - name: Build the release package (tag)
+        if: github.ref_type == 'tag'
+        run: |
+          docker run --rm --network=host -v "$PWD:/work" -w /work \
+            -e CARGO_HOME=/work/artifacts/cargo-home \
+            -e "URSINE_RUN_DIR=/work/$RUN_DIR" \
+            ursine-ci:ci sh scripts/package-release.sh --release \
+            "ursine-${GITHUB_REF_NAME}-x86_64-musl.tar.gz"
+
+      - name: Publish the tag release
+        if: github.ref_type == 'tag'
+        working-directory: ${{ env.RUN_DIR }}/release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          sha256sum -c ./*.sha256
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
             || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
           assets=$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')
-          for artifact in "$ASSET" "$CHECKSUM"; do
-            if printf '%s\n' "$assets" | grep -Fxq "$artifact"; then
-              echo "already published: $artifact"
+          for artifact in ./*.tar.gz ./*.sha256; do
+            name=$(basename "$artifact")
+            if printf '%s\n' "$assets" | grep -Fxq "$name"; then
+              echo "already published: $name"
             else
               gh release upload "$GITHUB_REF_NAME" "$artifact"
             fi
           done
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Pin release in nix/binary.nix
-        if: startsWith(github.ref, 'refs/tags/v')
+
+      - name: Save Cargo cache (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            artifacts/cargo-home/registry/index
+            artifacts/cargo-home/registry/cache
+            artifacts/cargo-home/git/db
+            artifacts/target
+          key: cargo-verify-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'ci/Containerfile') }}
+
+  nix:
+    runs-on: ubuntu-latest
+    needs: verify
+    permissions:
+      contents: write
+      packages: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_ASSET: ursine-${{ github.ref_name }}-x86_64-musl.tar.gz
+    steps:
+      # A tag updates the pin on main; PRs and branches check out their ref.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.ref_type == 'tag' && 'main' || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Nix lint and flake evaluation (PR/main, no build)
+        if: github.ref_type != 'tag'
+        run: |
+          docker run --rm --network=host -v "$PWD:/work" -w /work \
+            -e NIX_CONFIG="$NIX_CONFIG" "$NIX_IMAGE" sh -c '
+              nix run nixpkgs#statix -- check flake.nix
+              nix run nixpkgs#statix -- check nix
+              nix run nixpkgs#deadnix -- --fail flake.nix nix
+              nix run nixpkgs#alejandra -- --check flake.nix nix
+              nix eval --raw .#packages.x86_64-linux.ursine.version
+            '
+
+      - name: Fast integrity smoke of the published tarball (tag)
+        if: github.ref_type == 'tag'
+        run: |
+          set -eu
+          mkdir -p artifacts/release artifacts/smoke
+          gh release download "$GITHUB_REF_NAME" \
+            --pattern "$RELEASE_ASSET" --pattern "*.sha256" --dir artifacts/release
+          cd artifacts/release
+          sha256sum -c ./*.sha256
+          gzip -t "$RELEASE_ASSET"
+          tar tzf "$RELEASE_ASSET" >/dev/null
+          for entry in bin/ursined bin/ursinectl bin/ursine install.sh bin/ursine-activate; do
+            tar tzf "$RELEASE_ASSET" | grep -Fqx "./$entry"
+          done
+          cd "$GITHUB_WORKSPACE"
+          tar xzf "artifacts/release/$RELEASE_ASSET" -C artifacts/smoke
+          if readelf -d artifacts/smoke/bin/ursined | grep -q NEEDED; then
+            echo "ursined is not static" >&2
+            exit 1
+          fi
+          if readelf -d artifacts/smoke/bin/ursinectl | grep -q NEEDED; then
+            echo "ursinectl is not static" >&2
+            exit 1
+          fi
+          artifacts/smoke/bin/ursined --version | grep -Fq 'auth: shadow'
+          echo "smoke: tarball is intact and the daemon runs"
+
+      - name: Pin the release and package the flake source (tag)
+        if: github.ref_type == 'tag'
         shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          rm -f "artifacts/release/$CHECKSUM"
-          gh release download "$GITHUB_REF_NAME" --pattern "$CHECKSUM" --dir artifacts/release
-          sha=$(cut -d' ' -f1 "artifacts/release/$CHECKSUM")
+          sha=$(cut -d' ' -f1 artifacts/release/*.sha256 | head -n 1)
           test -n "$sha"
-          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${ASSET}"
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${RELEASE_ASSET}"
           sed -i \
             -e "s|^  version = \".*\";|  version = \"${version}\";|" \
             -e "s|^  url = \".*\";|  url = \"${url}\";|" \
             -e "s|^  sha256 = \".*\";|  sha256 = \"${sha}\";|" \
             nix/binary.nix
+          git diff -- nix/binary.nix
           if git diff --quiet -- nix/binary.nix; then
             echo "release pin already current"
-            exit 0
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add nix/binary.nix
+            git commit -m "chore(nix): pin release ${GITHUB_REF_NAME} [skip ci]"
+            git fetch origin main
+            git rebase origin/main
+            git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add nix/binary.nix
-          git commit -m "chore(nix): pin release ${GITHUB_REF_NAME} [skip ci]"
-          git fetch origin main
-          git rebase origin/main
-          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
-      - name: Package flake source
-        run: |
-          tar czf "artifacts/release/$FLAKE_ASSET" flake.nix flake.lock nix src/tools/ursine-activate.sh src/tools/ursine-deactivate.sh README.md
-          sha256sum "artifacts/release/$FLAKE_ASSET" > "artifacts/release/$FLAKE_ASSET.sha256"
-      - name: Attach flake to tag release
-        if: startsWith(github.ref, 'refs/tags/v')
+          docker run --rm --network=host -v "$PWD:/work" -w /work \
+            -e NIX_CONFIG="$NIX_CONFIG" "$NIX_IMAGE" sh -c '
+              test "$(nix eval --raw .#packages.x86_64-linux.ursine.version)" = "'"${version}"'"
+            '
+          flake="ursine-flake-${GITHUB_REF_NAME}.tar.gz"
+          tar czf "artifacts/release/$flake" \
+            flake.nix flake.lock nix src/tools/ursine-activate.sh \
+            src/tools/ursine-deactivate.sh README.md
+          (
+            cd artifacts/release
+            sha256sum "$flake" >"$flake.sha256"
+          )
+
+      - name: Attach the flake to the tag release (tag)
+        if: github.ref_type == 'tag'
         working-directory: artifacts/release
         run: |
+          set -eu
+          flake="ursine-flake-${GITHUB_REF_NAME}.tar.gz"
           assets=$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')
-          for artifact in "$FLAKE_ASSET" "$FLAKE_ASSET.sha256"; do
+          for artifact in "$flake" "$flake.sha256"; do
             if printf '%s\n' "$assets" | grep -Fxq "$artifact"; then
               echo "already published: $artifact"
             else
               gh release upload "$GITHUB_REF_NAME" "$artifact"
             fi
           done
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish rolling `latest` (main)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        working-directory: artifacts/release
-        run: |
-          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
-          gh release create latest "$ASSET" "$CHECKSUM" "$FLAKE_ASSET" "$FLAKE_ASSET.sha256" \
-            --title "Development snapshot (latest)" \
-            --notes "Automated musl build from $GITHUB_SHA on $(date -u +%Y-%m-%dT%H:%MZ)" \
-            --prerelease
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # ── Verify the auto-updated Nix pin on main after a tag release ──
-  verify-pin:
-    runs-on: ubuntu-latest
-    needs: [publish]
-    if: startsWith(github.ref, 'refs/tags/v')
-    container:
-      image: nixos/nix@sha256:62c506c32c75395163676006f0c00d75c31578fffaac1167d600289f72477b78
-    steps:
-      - run: |
-          git init repo && cd repo
-          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
-          git fetch --depth 1 origin main
-          git checkout FETCH_HEAD
-          nix flake check
-          nix build --out-link artifacts/result

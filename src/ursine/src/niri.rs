@@ -1,11 +1,6 @@
 //! Niri screen: schema-driven form for managed `config.kdl` sections.
 
-use cosmic::iced::Length;
-use cosmic::widget::selectable_text;
-use cosmic::widget::{
-    button, column, dropdown, row, scrollable, settings, text, text_input, toggler,
-};
-use cosmic::Element;
+use crate::prelude::*;
 use serde_json::json;
 use ursine_api::{NiriConfigView, NiriEnvVar, NiriKeybind, NiriOutput};
 

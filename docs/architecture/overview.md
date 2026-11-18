@@ -35,7 +35,7 @@ Desktop GUI: connect unix socket → prompt password ONCE per session
              + group check (wheel)
              → session token issued (RAM only, TTL) → Bearer token per request
 
-Web:         login → PAM today / OIDC later → session token → Bearer
+Web:         login → shadow today / OIDC later → session token → Bearer
 ```
 
 Rules:
@@ -107,10 +107,10 @@ docker run --rm -it -v "$PWD:/work" -w /work rust:alpine sh     # interactive sh
 
 `rust:alpine` is musl-based; auth needs no C headers (shadow + pwhash are pure Rust).
 
-GitHub CI (`.github/workflows/ci.yml`, to be created at v0.1) — **all jobs in Docker containers, no toolchain on the host**:
+GitHub CI (`.github/workflows/ci.yml`) — **everything in containers, no toolchain on the host**:
 
-1. **test gate, musl**: `alpine:3.22` container (FeralOS target; `apk add rust cargo git nodejs`); ONE job runs `scripts/test-gate.sh` (single pass: clippy-driver lints + the whole workspace suite — the same script `scripts/dev.sh check` runs locally; no cargo features exist today, `full` returns when web/oidc land in v3). fmt + rustdoc gate separately; static analysis (repo/SAST/deps/SBOM) runs in the `ursine-static` image via `scripts/static-check.sh` (policy: `docs/STATIC-ANALYSIS.md`). (`nodejs` in-container so JS actions work on musl.)
-2. **nix flake**: `nixos/nix` **container** → `nix flake check` + `nix build --out-link artifacts/result` on every push. `flake.nix` packages the **pinned musl artifact** (`nix/binary.nix`, URL+sha256): nixpkgs does not cache musl toolchains (stable included), so from-source musl builds take hours; Alpine builds the binary, Nix publishes it reproducibly.
+1. **verify, musl**: ONE Alpine image (`ci/Containerfile`) carries the Rust toolchain, GUI build deps and all analysers. One job runs `scripts/verify.sh` on push/PR (fmt, single-pass clippy + entire workspace suite, rustdoc, repo/SAST/deps/duplicates/SBOM, markdownlint, release build + installer smoke; the binary is discarded). On a tag, tests are skipped and only the release binary is built and published.
+2. **nix**: `nixos/nix` container. PR/main: statix/deadnix/alejandra + flake evaluation, no build. Tag: fast integrity smoke of the published tarball (sha256, gzip, tar listing, static contract, `ursined --version`), pin `nix/binary.nix`, evaluate the flake version, attach the flake source. The Nix job never builds or tests the app; `flake.nix` packages the **pinned musl artifact** (`nix/binary.nix`, URL+sha256) because nixpkgs does not cache musl toolchains.
 3. **publish**: on tag, same `nixos/nix` container builds musl binaries and CI attaches them to a GitHub Release; the flake itself is "published" by living in the repo (`github:skea999/ursine`).
 
 ## Release policy (2026-10-21)
@@ -140,10 +140,3 @@ GitHub CI (`.github/workflows/ci.yml`, to be created at v0.1) — **all jobs in 
 4. GUI: store + snapshots
 5. users, niri modules
 6. web (static) once API is stable
-
-## Future architecture
-
-- [Go daemon migration — future design](go-daemon-future.md): static Go daemon,
-  runtime selection, packaging and security constraints. Proposed only; 0.7.0
-  remains Rust. (Its PAM helper split is obsolete since the shadow-auth
-  switch — see the note in that doc.)

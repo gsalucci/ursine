@@ -34,7 +34,7 @@ pub async fn handle(
 ) -> Result<serde_json::Value, ApiError> {
     match action {
         Action::LogList => {
-            let list = blocking(list_logs).await?;
+            let list = crate::tooling::blocking("logs", list_logs).await?;
             serde_json::to_value(list)
                 .map_err(|e| ApiError::internal(format!("encode log list: {e}")))
         }
@@ -42,7 +42,8 @@ pub async fn handle(
             let file = file.clone();
             let query = query.clone();
             let limit = *limit;
-            let result = blocking(move || search_file(&file, &query, limit)).await?;
+            let result =
+                crate::tooling::blocking("logs", move || search_file(&file, &query, limit)).await?;
             serde_json::to_value(result)
                 .map_err(|e| ApiError::internal(format!("encode log search: {e}")))
         }
@@ -54,7 +55,8 @@ pub async fn handle(
             let file = file.clone();
             let lines = *lines;
             let cursor = *cursor;
-            let chunk = blocking(move || read_chunk(&file, lines, cursor)).await?;
+            let chunk =
+                crate::tooling::blocking("logs", move || read_chunk(&file, lines, cursor)).await?;
             serde_json::to_value(chunk)
                 .map_err(|e| ApiError::internal(format!("encode log chunk: {e}")))
         }
@@ -65,16 +67,56 @@ pub async fn handle(
     }
 }
 
-/// Run a blocking closure on the blocking pool (file IO must never stall
-/// the async executor).
-async fn blocking<F, T>(work: F) -> Result<T, ApiError>
-where
-    F: FnOnce() -> Result<T, ApiError> + Send + 'static,
-    T: Send + 'static,
-{
-    tokio::task::spawn_blocking(work)
-        .await
-        .map_err(|e| ApiError::internal(format!("logs task failed: {e}")))?
+/// Read `len` bytes from `from` and reject binary content.
+fn read_window(file: &mut std::fs::File, from: u64, len: u64) -> Result<Vec<u8>, ApiError> {
+    file.seek(SeekFrom::Start(from))
+        .map_err(|e| ApiError::internal(format!("seek: {e}")))?;
+    let mut buf = Vec::new();
+    file.take(len)
+        .read_to_end(&mut buf)
+        .map_err(|e| ApiError::internal(format!("read: {e}")))?;
+    ensure_text(&buf)?;
+    Ok(buf)
+}
+
+/// First complete line of a window: index past the leading partial line when
+/// the window starts mid-file. `None` when that partial line has no newline.
+fn complete_start(buf: &[u8], partial: bool) -> Option<usize> {
+    if !partial {
+        return Some(0);
+    }
+    buf.iter().position(|b| *b == b'\n').map(|i| i + 1)
+}
+
+/// Keep the last `lines` complete lines of the window starting at
+/// `start_in_buf`, offset `base` in the file, ending at `end`.
+fn tail_chunk(
+    buf: &[u8],
+    base: u64,
+    mut start_in_buf: usize,
+    lines: usize,
+    end: u64,
+    size: u64,
+) -> LogChunk {
+    let window = buf.get(start_in_buf..).unwrap_or(&[]);
+    let mut spans = line_spans(window);
+    // Drop from the FRONT until `lines` remain; `cut` = end of the last
+    // dropped line, relative to the window start.
+    let mut cut = 0usize;
+    while spans.len() > lines {
+        let (offset, len) = spans.remove(0);
+        cut = offset + len + 1;
+    }
+    start_in_buf += cut;
+    let content = String::from_utf8_lossy(buf.get(start_in_buf..).unwrap_or(&[])).into_owned();
+    let start = base + start_in_buf as u64;
+    LogChunk {
+        content,
+        start,
+        end,
+        size,
+        has_before: start > 0,
+    }
 }
 
 /// Fresh scan of `/var/log` (new files appear on the next list call).
@@ -188,41 +230,11 @@ fn read_chunk(rel: &str, lines: u32, cursor: LogCursor) -> Result<LogChunk, ApiE
                 return Ok(empty_chunk(0, 0, 0));
             }
             let bound = size.saturating_sub(READ_CAP);
-            file.seek(SeekFrom::Start(bound))
-                .map_err(|e| ApiError::internal(format!("seek: {e}")))?;
-            let mut buf = Vec::new();
-            file.take(READ_CAP)
-                .read_to_end(&mut buf)
-                .map_err(|e| ApiError::internal(format!("read: {e}")))?;
-            ensure_text(&buf)?;
-            let mut start_in_buf = 0usize;
-            if bound > 0 {
-                // The window starts mid-line: drop the leading partial.
-                match buf.iter().position(|b| *b == b'\n') {
-                    Some(i) => start_in_buf = i + 1,
-                    None => return Ok(empty_chunk(bound + buf.len() as u64, size, size)),
-                }
-            }
-            let rest = buf.get(start_in_buf..).unwrap_or(&[]);
-            let mut spans = line_spans(rest);
-            // Drop from the FRONT until `lines` remain; `cut` = end of the
-            // last dropped line, relative to the window start.
-            let mut cut = 0usize;
-            while spans.len() > lines {
-                let (offset, len) = spans.remove(0);
-                cut = offset + len + 1;
-            }
-            start_in_buf += cut;
-            let content =
-                String::from_utf8_lossy(buf.get(start_in_buf..).unwrap_or(&[])).into_owned();
-            let start = bound + start_in_buf as u64;
-            Ok(LogChunk {
-                content,
-                start,
-                end: size,
-                size,
-                has_before: start > 0,
-            })
+            let buf = read_window(&mut file, bound, READ_CAP)?;
+            let Some(start_in_buf) = complete_start(&buf, bound > 0) else {
+                return Ok(empty_chunk(bound + buf.len() as u64, size, size));
+            };
+            Ok(tail_chunk(&buf, bound, start_in_buf, lines, size, size))
         }
         LogCursor::Before { offset } => {
             let offset = offset.min(size);
@@ -230,51 +242,18 @@ fn read_chunk(rel: &str, lines: u32, cursor: LogCursor) -> Result<LogChunk, ApiE
                 return Ok(empty_chunk(0, 0, size));
             }
             let lower = offset.saturating_sub(READ_CAP);
-            file.seek(SeekFrom::Start(lower))
-                .map_err(|e| ApiError::internal(format!("seek: {e}")))?;
-            let mut buf = Vec::new();
-            file.take(offset - lower)
-                .read_to_end(&mut buf)
-                .map_err(|e| ApiError::internal(format!("read: {e}")))?;
-            ensure_text(&buf)?;
-            let mut start_in_buf = 0usize;
-            if lower > 0 {
-                match buf.iter().position(|b| *b == b'\n') {
-                    Some(i) => start_in_buf = i + 1,
-                    None => return Ok(empty_chunk(offset, offset, size)),
-                }
-            }
-            let rest = buf.get(start_in_buf..).unwrap_or(&[]);
-            let mut spans = line_spans(rest);
-            let mut cut = 0usize;
-            while spans.len() > lines {
-                let (offset, len) = spans.remove(0);
-                cut = offset + len + 1;
-            }
-            start_in_buf += cut;
-            let content =
-                String::from_utf8_lossy(buf.get(start_in_buf..).unwrap_or(&[])).into_owned();
-            let start = lower + start_in_buf as u64;
-            Ok(LogChunk {
-                content,
-                start,
-                end: offset,
-                size,
-                has_before: start > 0,
-            })
+            let buf = read_window(&mut file, lower, offset - lower)?;
+            let Some(start_in_buf) = complete_start(&buf, lower > 0) else {
+                return Ok(empty_chunk(offset, offset, size));
+            };
+            Ok(tail_chunk(&buf, lower, start_in_buf, lines, offset, size))
         }
         LogCursor::From { offset } => {
             let offset = offset.min(size);
             if offset >= size {
                 return Ok(empty_chunk(offset, offset, size));
             }
-            file.seek(SeekFrom::Start(offset))
-                .map_err(|e| ApiError::internal(format!("seek: {e}")))?;
-            let mut buf = Vec::new();
-            file.take(READ_CAP)
-                .read_to_end(&mut buf)
-                .map_err(|e| ApiError::internal(format!("read: {e}")))?;
-            ensure_text(&buf)?;
+            let buf = read_window(&mut file, offset, READ_CAP)?;
             // Complete lines only: a partial tail waits for the next poll.
             let last_newline = buf.iter().rposition(|b| *b == b'\n');
             let Some(last_newline) = last_newline else {

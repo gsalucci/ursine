@@ -1,0 +1,1 @@
+{"ts":1794995304115,"topic":"Binding gates, artifacts run dir, dedupe 0 clones, host acceptance script","content":"Today: gates max severity + one image/two jobs + container-dev artifacts + jscpd 0 + test-host.sh (dev-flake deleted); check+verify green, uncommitted. Next: user runs test-host.sh, then commit.","tags":[],"importance":"normal"}

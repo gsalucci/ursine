@@ -19,5 +19,17 @@ pub mod ratelimit;
 pub mod session;
 pub mod socket;
 
+pub(crate) mod atomic;
+pub(crate) mod tooling;
+
+// One wiring surface for the two binaries (`ursined`, `ursinectl`): they
+// import the daemon parts here instead of repeating the module paths.
+pub use audit::AuditLog;
+pub use auth::Authenticator;
+pub use capabilities::Registry;
+pub use clock::{Clock, SystemClock};
 pub use dispatch::Daemon;
 pub use error::CoreError;
+pub use jobs::JobRegistry;
+pub use ratelimit::RateLimiter;
+pub use session::TokenStore;

@@ -88,6 +88,44 @@ pub(super) fn validate_username(user: &str) -> Result<(), ApiError> {
 
 /// Validate a nix regex pattern (`--regex`): safe inside single quotes, no shell
 /// metacharacters that we refuse, no quote/newline. Spaces are allowed.
+/// Compile a validated pattern once; the finder keeps input order.
+pub(crate) fn compile_regex(pattern: &str) -> Result<regex::Regex, ApiError> {
+    validate_regex(pattern)?;
+    regex::Regex::new(pattern).map_err(|_| ApiError::invalid("invalid regex pattern"))
+}
+
+/// Regex pattern actions share one preamble: a dry run answers with the
+/// matched names, and a real run with no match answers with empty output.
+/// `None` means the caller must start the job with `names`.
+pub(crate) fn regex_noop(dry_run: bool, names: &[String]) -> Option<serde_json::Value> {
+    if dry_run {
+        return Some(serde_json::json!({"dry_run": true, "would_change": names}));
+    }
+    if names.is_empty() {
+        return Some(serde_json::json!(CommandOutcome {
+            stdout: String::new(),
+            stderr: String::new(),
+        }));
+    }
+    None
+}
+
+/// Search boxes share one query shape: trimmed, bounded, never option-like,
+/// and limited to characters package ids and descriptions use.
+pub(crate) fn validate_search_query<'a>(query: &'a str, label: &str) -> Result<&'a str, ApiError> {
+    let query = query.trim();
+    if query.is_empty()
+        || query.len() > 128
+        || query.starts_with('-')
+        || !query
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-'))
+    {
+        return Err(ApiError::invalid(format!("invalid {label} search query")));
+    }
+    Ok(query)
+}
+
 pub(crate) fn validate_regex(pattern: &str) -> Result<(), ApiError> {
     if pattern.is_empty() || pattern.len() > 256 {
         return Err(ApiError::invalid("invalid regex pattern"));

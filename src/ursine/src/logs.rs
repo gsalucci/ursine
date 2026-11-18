@@ -1,13 +1,8 @@
 //! Logs screen: dynamic `/var/log` viewer (SPEC-logs) — tail with an
 //! editable line count, previous chunks, and a follow (`tail -f`) mode.
 
-use cosmic::iced::Length;
-use cosmic::widget::selectable_text;
-use cosmic::widget::{button, column, dropdown, row, scrollable, text, text_input, toggler};
-use cosmic::Element;
+use crate::prelude::*;
 use ursine_api::{default_log_lines, LogFile, LogHit};
-
-use crate::app::Message;
 
 /// Which read produced a chunk (keeps stale responses from misfiling).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,26 +78,16 @@ pub const LOGS_SCROLL_ID: &str = "ursine-logs-body";
 
 impl LogsState {
     pub fn view(&self) -> Element<'_, Message> {
-        let mut items: Vec<Element<'_, Message>> = vec![row(vec![
-            text::title2("Logs").into(),
-            text("").width(Length::Fill).into(),
-            button::text("Refresh")
-                .on_press_maybe((!self.busy).then_some(Message::OpenLogs))
-                .into(),
-        ])
-        .spacing(12)
-        .width(Length::Fill)
-        .into()];
-
-        if let Some(error) = &self.error {
-            items.push(selectable_text(error.clone()).into());
-        }
-        if let Some(message) = &self.message {
-            items.push(text(message.clone()).into());
-        }
-        if self.busy {
-            items.push(text("Reading…").into());
-        }
+        let mut items = vec![ui::header(
+            "Logs",
+            (!self.busy).then_some(Message::OpenLogs),
+        )];
+        items.extend(ui::status(
+            self.error.as_ref(),
+            self.message.as_deref(),
+            self.busy.then_some("Reading…"),
+            None,
+        ));
 
         // Controls: line count, previous chunk, follow.
         items.push(
@@ -209,7 +194,7 @@ impl LogsState {
                 // Height on the SCROLLABLE (not on the content): the text
                 // overflows and the side scrollbar appears.
                 scrollable(
-                    cosmic::widget::container(body)
+                    container(body)
                         .class(cosmic::theme::Container::Background)
                         .padding(4),
                 )

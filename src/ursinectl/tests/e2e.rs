@@ -52,14 +52,70 @@ fn stderr(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
+/// A command must have succeeded; its stderr is the failure message.
+fn ok(out: &Output) {
+    assert!(out.status.success(), "{}", stderr(out));
+}
+
+/// Run a `--json` command, assert success and return the parsed reply.
+fn json_ok(args: &[&str]) -> serde_json::Value {
+    let out = run(args);
+    ok(&out);
+    serde_json::from_str(stdout(&out).trim()).unwrap()
+}
+
+/// Run the CLI as `nobody`: the root gate must fire before any side effect
+/// (exit 2 plus the exact hint).
+fn assert_root_gate(command: &str) {
+    let out = Command::new("su")
+        .args([
+            "-s",
+            "/bin/sh",
+            "nobody",
+            "-c",
+            &format!("{} {command}", env!("CARGO_BIN_EXE_ursinectl")),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "stderr: {}", stderr(&out));
+    assert!(
+        stderr(&out).contains("must run as root"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+/// The module gate must answer "disabled" (exit 1) for this config.
+fn assert_module_disabled(config: &str) {
+    let out = run(&["--config", config, "crontab", "crontab_get"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("module disabled by configuration"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+/// Persist one crontab module switch through the CLI.
+fn set_crontab_switch(config: &str, value: &str) -> Output {
+    run(&[
+        "--config",
+        config,
+        "config",
+        "set_module_switch",
+        "module=crontab",
+        &format!("value={value}"),
+    ])
+}
+
 #[test]
 fn version_and_help_succeed_without_side_effects() {
     let out = run(&["--version"]);
-    assert!(out.status.success(), "{}", stderr(&out));
+    ok(&out);
     assert!(stdout(&out).contains(env!("CARGO_PKG_VERSION")));
 
     let out = run(&["--help"]);
-    assert!(out.status.success(), "{}", stderr(&out));
+    ok(&out);
     assert!(stdout(&out).contains("USAGE"));
 }
 
@@ -72,9 +128,7 @@ fn no_args_is_usage_error() {
 
 #[test]
 fn status_prints_version_json() {
-    let out = run(&["--json", "system", "status"]);
-    assert!(out.status.success(), "{}", stderr(&out));
-    let v: serde_json::Value = serde_json::from_str(&stdout(&out)).unwrap();
+    let v = json_ok(&["--json", "system", "status"]);
     assert!(v.get("version").is_some(), "{v}");
     // Wire contract every frontend depends on.
     assert_eq!(v["protocol_version"], 5, "{v}");
@@ -114,25 +168,21 @@ fn crontab_round_trip_as_root() {
     // Set a known crontab, read it back, then clear it.
     let payload = "# ursinectl-e2e\n* * * * * /bin/true\n";
     let out = run_stdin(&["crontab", "crontab_set", "content=-", "--yes"], payload);
-    assert!(out.status.success(), "{}", stderr(&out));
+    ok(&out);
 
-    let out = run(&["--json", "crontab", "crontab_get"]);
-    assert!(out.status.success(), "{}", stderr(&out));
-    let v: serde_json::Value = serde_json::from_str(&stdout(&out)).unwrap();
+    let v = json_ok(&["--json", "crontab", "crontab_get"]);
     assert_eq!(v["crontab"].as_str().unwrap(), payload, "{v}");
 
     let out = run_stdin(&["crontab", "crontab_set", "content=-", "--yes"], "");
-    assert!(out.status.success(), "{}", stderr(&out));
-    let out = run(&["--json", "crontab", "crontab_get"]);
-    assert!(out.status.success(), "{}", stderr(&out));
-    let v: serde_json::Value = serde_json::from_str(&stdout(&out)).unwrap();
+    ok(&out);
+    let v = json_ok(&["--json", "crontab", "crontab_get"]);
     assert!(v["crontab"].is_null(), "cleared crontab must be null: {v}");
 }
 
 #[test]
 fn module_help_lists_actions() {
     let out = run(&["nix"]);
-    assert!(out.status.success(), "{}", stderr(&out));
+    ok(&out);
     assert!(stdout(&out).contains("list_installed"));
 }
 
@@ -141,23 +191,7 @@ fn module_help_lists_actions() {
 fn non_root_is_refused() {
     // Drop to `nobody` (uid 65534) via su: the root gate must fire before
     // any side effect.
-    let bin_path = env!("CARGO_BIN_EXE_ursinectl");
-    let out = Command::new("su")
-        .args([
-            "-s",
-            "/bin/sh",
-            "nobody",
-            "-c",
-            &format!("{bin_path} system status"),
-        ])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(2), "stderr: {}", stderr(&out));
-    assert!(
-        stderr(&out).contains("must run as root"),
-        "{}",
-        stderr(&out)
-    );
+    assert_root_gate("system status");
 }
 
 // ---- deeper E2E coverage ----
@@ -201,13 +235,7 @@ fn module_switch_off_via_config_file_blocks_module() {
     let cfg = dir.join("config.toml");
     std::fs::write(&cfg, "[modules]\ncrontab = false\n").unwrap();
     let cfg_str = cfg.to_str().unwrap();
-    let out = run(&["--config", cfg_str, "crontab", "crontab_get"]);
-    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-    assert!(
-        stderr(&out).contains("module disabled by configuration"),
-        "{}",
-        stderr(&out)
-    );
+    assert_module_disabled(cfg_str);
     // …while the same command with the default config still works.
     let out = run(&["crontab", "crontab_get"]);
     assert!(
@@ -224,7 +252,7 @@ fn config_init_get_roundtrip_e2e() {
     let cfg_str = cfg.to_str().unwrap();
 
     let out = run(&["--config", cfg_str, "config", "init"]);
-    assert!(out.status.success(), "{}", stderr(&out));
+    ok(&out);
     assert!(cfg.exists());
     let body = std::fs::read_to_string(&cfg).unwrap();
     assert!(body.contains("[modules]"), "{body}");
@@ -233,45 +261,19 @@ fn config_init_get_roundtrip_e2e() {
     let out = run(&["--config", cfg_str, "config", "init"]);
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
 
-    let out = run(&["--json", "--config", cfg_str, "config", "get_config"]);
-    assert!(out.status.success(), "{}", stderr(&out));
-    let v: serde_json::Value = serde_json::from_str(stdout(&out).trim()).unwrap();
+    let v = json_ok(&["--json", "--config", cfg_str, "config", "get_config"]);
     assert_eq!(v["exists"], true, "{v}");
 
     // Persist a switch and read it back through a fresh call.
     // Full cycle: Off blocks the live gate, Auto unblocks it, and the
     // switch persists in the file for the next invocation.
-    let out = run(&[
-        "--config",
-        cfg_str,
-        "config",
-        "set_module_switch",
-        "module=crontab",
-        "value=false",
-    ]);
-    assert!(out.status.success(), "{}", stderr(&out));
-    let out = run(&["--json", "--config", cfg_str, "config", "get_config"]);
-    let v: serde_json::Value = serde_json::from_str(stdout(&out).trim()).unwrap();
+    ok(&set_crontab_switch(cfg_str, "false"));
+    let v = json_ok(&["--json", "--config", cfg_str, "config", "get_config"]);
     assert_eq!(v["modules"]["crontab"], false, "{v}");
-    let out = run(&["--config", cfg_str, "crontab", "crontab_get"]);
-    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-    assert!(
-        stderr(&out).contains("module disabled by configuration"),
-        "{}",
-        stderr(&out)
-    );
+    assert_module_disabled(cfg_str);
 
-    let out = run(&[
-        "--config",
-        cfg_str,
-        "config",
-        "set_module_switch",
-        "module=crontab",
-        "value=auto",
-    ]);
-    assert!(out.status.success(), "{}", stderr(&out));
-    let out = run(&["--json", "--config", cfg_str, "config", "get_config"]);
-    let v: serde_json::Value = serde_json::from_str(stdout(&out).trim()).unwrap();
+    ok(&set_crontab_switch(cfg_str, "auto"));
+    let v = json_ok(&["--json", "--config", cfg_str, "config", "get_config"]);
     assert_eq!(v["modules"]["crontab"], "auto", "{v}");
     let out = run(&["--config", cfg_str, "crontab", "crontab_get"]);
     assert!(out.status.success(), "Auto must unblock: {}", stderr(&out));
@@ -304,9 +306,7 @@ fn as_user_outside_user_scoped_module_is_usage_error() {
 
 #[test]
 fn capabilities_list_is_reachable_e2e() {
-    let out = run(&["--json", "caps", "list"]);
-    assert!(out.status.success(), "{}", stderr(&out));
-    let v: serde_json::Value = serde_json::from_str(stdout(&out).trim()).unwrap();
+    let v = json_ok(&["--json", "caps", "list"]);
     let arr = v.as_array().expect("caps list is an array");
     assert!(arr.iter().any(|c| c["capability"] == "crontab"), "{v}");
     assert!(arr
@@ -320,7 +320,7 @@ fn logs_search_and_read_e2e() {
     let path = std::path::Path::new("/var/log").join(&name);
     std::fs::write(&path, "alpha\nbeta gamma\ndelta\n").unwrap();
 
-    let out = run(&[
+    let v = json_ok(&[
         "--json",
         "logs",
         "log_read",
@@ -328,11 +328,9 @@ fn logs_search_and_read_e2e() {
         "lines=10",
         "cursor={\"mode\":\"end\"}",
     ]);
-    assert!(out.status.success(), "{}", stderr(&out));
-    let v: serde_json::Value = serde_json::from_str(stdout(&out).trim()).unwrap();
     assert!(v["content"].as_str().unwrap().contains("beta gamma"), "{v}");
 
-    let out = run(&[
+    let v = json_ok(&[
         "--json",
         "logs",
         "log_search",
@@ -340,8 +338,6 @@ fn logs_search_and_read_e2e() {
         "query=GAMMA",
         "limit=5",
     ]);
-    assert!(out.status.success(), "{}", stderr(&out));
-    let v: serde_json::Value = serde_json::from_str(stdout(&out).trim()).unwrap();
     assert_eq!(v["hits"].as_array().unwrap().len(), 1, "{v}");
 
     // Escape is an API error (exit 1), never a read.
@@ -437,7 +433,7 @@ fn apk_update_check_refreshes_indexes_and_lists() {
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
     let out = last.expect("apk database stayed locked for 10s");
-    assert!(out.status.success(), "{}", stderr(&out));
+    ok(&out);
     assert!(stdout(&out).contains("\"updates\""), "{}", stdout(&out));
 }
 
@@ -472,15 +468,13 @@ fn crontab_set_from_at_file_roundtrip() {
         &format!("content=@{}", cron.display()),
         "--yes",
     ]);
-    assert!(out.status.success(), "{}", stderr(&out));
-    let out = run(&["--json", "crontab", "crontab_get"]);
-    assert!(out.status.success(), "{}", stderr(&out));
-    let v: serde_json::Value = serde_json::from_str(stdout(&out).trim()).unwrap();
+    ok(&out);
+    let v = json_ok(&["--json", "crontab", "crontab_get"]);
     assert_eq!(v["crontab"].as_str().unwrap(), payload, "{v}");
 
     // Clear again so parallel tests never see a dirty root crontab.
     let out = run_stdin(&["crontab", "crontab_set", "content=-", "--yes"], "");
-    assert!(out.status.success(), "{}", stderr(&out));
+    ok(&out);
 }
 
 #[test]
@@ -513,21 +507,5 @@ fn unsafe_config_files_are_refused_before_any_call() {
 
 #[test]
 fn non_root_mutation_is_refused_at_the_gate_before_anything() {
-    let bin_path = env!("CARGO_BIN_EXE_ursinectl");
-    let out = Command::new("su")
-        .args([
-            "-s",
-            "/bin/sh",
-            "nobody",
-            "-c",
-            &format!("{bin_path} crontab crontab_set content=x --yes"),
-        ])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(2), "stderr: {}", stderr(&out));
-    assert!(
-        stderr(&out).contains("must run as root"),
-        "{}",
-        stderr(&out)
-    );
+    assert_root_gate("crontab crontab_set content=x --yes");
 }

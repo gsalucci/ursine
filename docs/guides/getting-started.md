@@ -19,22 +19,24 @@ project containers.
 One-time image build:
 
 ```bash
-podman build -t ursine-ci:1 -f ci/Containerfile.dev .
+podman build -t ursine-ci:1 -f ci/Containerfile .
 ```
 
 Then use the exact commands in [build-and-test.md](build-and-test.md). They are
 the same commands CI runs: `cargo fmt --check`, strict clippy,
 `cargo test` in the Alpine/musl container.
 
-Static analysis uses `ci/Containerfile.static` and `scripts/static-check.sh`;
-policy and gates are in [../STATIC-ANALYSIS.md](../STATIC-ANALYSIS.md).
+Static analysis and docs use the same image and `scripts/static-check.sh` /
+`scripts/docs-check.sh`; policy and gates are in
+[../STATIC-ANALYSIS.md](../STATIC-ANALYSIS.md).
 
 ## Release and Nix
 
 The release flake (`flake.nix`) packages the pinned dynamic-musl release
 tarball in `nix/binary.nix`; it does not compile the workspace inside Nix. CI
-builds the release tarball and runs `nix flake check` + `nix build`. See
-[README](../../README.md) and [build-and-test.md](build-and-test.md).
+builds the release tarball; the Nix job only evaluates the flake, runs an
+integrity smoke on the tarball and pins it. See [README](../../README.md) and
+[build-and-test.md](build-and-test.md).
 
 ## Disk space
 

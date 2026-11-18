@@ -1,11 +1,6 @@
 //! Login screen: credentials in, session token out.
 
-use cosmic::iced::Length;
-use cosmic::widget::selectable_text;
-use cosmic::widget::{button, column, container, scrollable, text, text_input};
-use cosmic::Element;
-
-use crate::app::Message;
+use crate::prelude::*;
 
 pub struct LoginState {
     pub user: String,

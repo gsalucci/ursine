@@ -33,13 +33,17 @@ pub async fn handle(
     match action {
         Action::ThemeDetect => {
             let (home, uid, gid) = target_identity(ctx.as_user)?;
-            let status = blocking(move || detect_blocking(&home, uid, gid)).await?;
+            let status =
+                crate::tooling::blocking("theming", move || detect_blocking(&home, uid, gid))
+                    .await?;
             serde_json::to_value(status)
                 .map_err(|e| ApiError::internal(format!("encode theming status: {e}")))
         }
         Action::ThemeGet => {
             let (home, uid, gid) = target_identity(ctx.as_user)?;
-            let snapshot = blocking(move || snapshot_blocking(&home, uid, gid)).await?;
+            let snapshot =
+                crate::tooling::blocking("theming", move || snapshot_blocking(&home, uid, gid))
+                    .await?;
             serde_json::to_value(snapshot)
                 .map_err(|e| ApiError::internal(format!("encode theme snapshot: {e}")))
         }
@@ -47,9 +51,10 @@ pub async fn handle(
             let (home, uid, gid) = target_identity(ctx.as_user)?;
             let show_minimize = *show_minimize;
             let copies = crate::backup_configs::copies_from(&ctx.config);
-            let report =
-                blocking(move || apply::run_blocking(&home, uid, gid, show_minimize, copies))
-                    .await?;
+            let report = crate::tooling::blocking("theming", move || {
+                apply::run_blocking(&home, uid, gid, show_minimize, copies)
+            })
+            .await?;
             serde_json::to_value(report)
                 .map_err(|e| ApiError::internal(format!("encode apply report: {e}")))
         }
@@ -58,18 +63,6 @@ pub async fn handle(
             crate::modules::action_name(action)
         ))),
     }
-}
-
-/// Run a blocking closure on the blocking pool (config parsing + file IO
-/// must never stall the async executor).
-async fn blocking<F, T>(work: F) -> Result<T, ApiError>
-where
-    F: FnOnce() -> Result<T, ApiError> + Send + 'static,
-    T: Send + 'static,
-{
-    tokio::task::spawn_blocking(work)
-        .await
-        .map_err(|e| ApiError::internal(format!("theming task failed: {e}")))?
 }
 
 /// Resolve the target user to (home, uid, gid); rejects root/system users.

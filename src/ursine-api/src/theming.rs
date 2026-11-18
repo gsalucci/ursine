@@ -245,34 +245,11 @@ mod tests {
 
     #[test]
     fn snapshot_roundtrips_without_none_fields() {
-        let snapshot = ThemeSnapshot {
-            source: ThemeSource::Dms,
-            name: "green".into(),
-            dark: true,
-            colors: ThemeColors {
-                background: "#10140f".into(),
-                foreground: "#e0e4db".into(),
-                primary: "#4caf50".into(),
-                secondary: "#2e7d32".into(),
-                surface: "#1b5e20".into(),
-                error: "#f2b8b5".into(),
-                success: "#4caf50".into(),
-                warning: "#dacb52".into(),
-                outline: "#35a639".into(),
-            },
-            fonts: ThemeFonts {
-                ui: "Inter Variable".into(),
-                mono: "Fira Code".into(),
-                weight: 400,
-                scale: 1.0,
-            },
-            corner_radius: Some(12),
-            icon_theme: None,
-            cursor: Some(CursorTheme {
-                name: "Adwaita".into(),
-                size: 16,
-            }),
-        };
+        let snapshot: ThemeSnapshot = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/theme-snapshot.json"
+        )))
+        .expect("theme fixture parses");
         let value = serde_json::to_value(&snapshot).unwrap();
         assert!(!value["icon_theme"].is_object());
         assert!(value.get("icon_theme").is_none());

@@ -22,7 +22,7 @@ Stack: **Rust** (workspace, edition 2021+). Target Alpine Linux / musl. Decision
 
 **Package progress (binding)**: package mutations (`apk`, `flatpak`, `nix`) must expose the process output as terminal text, not a percentage bar. Use a daemon-side job log with `job_output` polling (RAM job registry; `/run/ursine/jobs/<id>.log`) or a future streaming protocol. The frontend shows live output and a **Close** button only after the job completes. Implemented 2026-10-27 (backend + GUI); keep any new mutation on this path.
 
-**Static analysis (binding)**: canonical commands in `docs/guides/build-and-test.md`; policy and gates in `docs/STATIC-ANALYSIS.md`. All build/test/static work runs in containers (`ursine-ci:1`, `ursine-static:1`, `nixos/nix`). Never run cargo/nix/scanners on the host. `scripts/static-check.sh` is the single static entry point.
+**Static analysis (binding)**: canonical commands in `docs/guides/build-and-test.md`; policy and gates in `docs/STATIC-ANALYSIS.md`. All build/test/static work runs in containers: ONE Alpine image (`ursine-ci:1`, built from `ci/Containerfile`) for build, tests, static analysis and docs; `nixos/nix` for the Nix job. Never run cargo/nix/scanners on the host. `scripts/static-check.sh` is the single static entry point, `scripts/verify.sh` the full push/PR sequence. Duplicate source clones are blocking: jscpd at 50 tokens (threshold 0). `cargo tree -d` is a report in the run directory (duplicates come from the pinned libcosmic graph); generated files never enter the repository. Advisories are zero-tolerance with documented upstream-only ignores.
 
 **Review closure (binding)**: fix every confirmed finding — blocker, high, medium and low — before commit. "Perfect code" means zero known defects at commit time, not zero detected defects. Never silently downgrade or defer a finding: a deferral requires explicit user approval and must be recorded in `state/session-state.json` with owner and rationale. A fix cycle revalidates the full gate; findings introduced by a fix count as new defects. Do not commit while any finding is open without that recorded approval.
 
@@ -58,14 +58,15 @@ State: `state/session-state.json`.
 
 ## Stack commands
 
-No host toolchain. Run everything in the dev image (see getting-started):
+No host toolchain. Run everything in the single CI/dev image (see getting-started):
 
 ```bash
-podman build -t ursine-ci:1 -f ci/Containerfile.dev .   # once
+podman build -t ursine-ci:1 -f ci/Containerfile .   # once
 podman run --rm --network=host -v "$PWD:/work" -w /work \
   -e CARGO_HOME=/work/artifacts/cargo-home ursine-ci:1 cargo build --workspace
 # Test gate (single pass: clippy lints + all tests) — the SAME script CI runs:
 scripts/dev.sh check        # fmt + scripts/test-gate.sh
+scripts/dev.sh verify       # exact CI push sequence (static all + docs + release smoke)
 ```
 
 Auth = shadow handshake (`/etc/shadow` + pwhash, Webmin pattern): one build,
@@ -73,7 +74,7 @@ no cargo features, daemon+CLI link fully static.
 
 ## Host isolation (ABSOLUTE RULE)
 
-Host machine NEVER modified by agents or scripts: no installs, no nix gc/profile changes, no global tooling, no system commands. All build/test/dedup/security/dependency checks and maintenance inside Docker containers (alpine = cargo, nixos/nix = flake). Container mounts: project root READ-ONLY, only `artifacts/` writable. Temp files: `artifacts/<tool-or-task>/` only, never host `/tmp`. Retention: last 3 artifact versions per subfolder (`scripts/clean-artifacts.sh`). Nix store GC: via nixos/nix container, NEVER `-d` (deletes host profile generations).
+Host machine NEVER modified by agents or scripts: no installs, no nix gc/profile changes, no global tooling, no system commands. **Single exception (user decision 2026-11-18)**: `scripts/test-host.sh` is the release acceptance run, executed after the tag is published — it reads nothing from the repository (the package comes from the published GitHub flake), registers/refreshes `flake:ursine`, installs or upgrades the profile package, runs `sudo ursine-activate`, then read-only checks. The user runs it; agents never do. `scripts/build-gui-dev.sh` and `nix/dev-flake.nix` are deleted — no other host path exists. All build/test/dedup/security/dependency checks and maintenance inside Docker containers (alpine = cargo, nixos/nix = flake). Container mounts: project root READ-ONLY, only `artifacts/` writable. Gate results: `artifacts/container-dev/<timestamp>/` (`scripts/run-dir.sh`), newest 10 runs kept. Temp files: `artifacts/<tool-or-task>/` only, never host `/tmp`. Retention: last 3 artifact versions per subfolder (`scripts/clean-artifacts.sh`). Nix store GC: via nixos/nix container, NEVER `-d` (deletes host profile generations).
 
 Repo content: ENGLISH only (code, docs, scripts, comments, commits).
 

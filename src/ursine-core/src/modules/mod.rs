@@ -43,6 +43,16 @@ pub struct ModuleCtx<'a> {
     pub principal: &'a Principal,
 }
 
+/// The names every module handler starts from; one definition keeps the
+/// import block identical across modules.
+#[allow(clippy::redundant_pub_crate)] // crate-only module: pub(crate) is the real visibility
+pub(crate) mod prelude {
+    pub(crate) use serde_json::json;
+    pub(crate) use ursine_api::{Action, ApiError};
+
+    pub(crate) use super::ModuleCtx;
+}
+
 /// Gating requirements per module.
 fn required_caps(module: ModuleId) -> &'static [Capability] {
     match module {
@@ -389,17 +399,25 @@ mod tests {
         }
     }
 
+    impl TestEnv {
+        /// The `ModuleCtx` every handler test needs; the config is cloned so
+        /// each test can mutate its own copy.
+        fn ctx<'a>(&'a self, caps: &'a Registry, config: &UrsineConfig) -> ModuleCtx<'a> {
+            ModuleCtx {
+                caps,
+                config: config.clone(),
+                as_user: "u",
+                jobs: &self.jobs,
+                principal: &self.principal,
+            }
+        }
+    }
+
     #[tokio::test]
     async fn system_status_reports_shadow_auth() {
         let (caps, cfg, _path) = ctx_with(AllMissing);
         let env = test_env("ctx");
-        let ctx = ModuleCtx {
-            caps: &caps,
-            config: cfg.clone(),
-            as_user: "u",
-            jobs: &env.jobs,
-            principal: &env.principal,
-        };
+        let ctx = env.ctx(&caps, &cfg);
         let v = handle(ModuleId::System, &Action::Status, &ctx)
             .await
             .unwrap();
@@ -411,13 +429,7 @@ mod tests {
     async fn capabilities_list_returns_every_probed_capability() {
         let (caps, cfg, _path) = ctx_with(AllMissing);
         let env = test_env("ctx");
-        let ctx = ModuleCtx {
-            caps: &caps,
-            config: cfg.clone(),
-            as_user: "u",
-            jobs: &env.jobs,
-            principal: &env.principal,
-        };
+        let ctx = env.ctx(&caps, &cfg);
         let v = handle(ModuleId::Capabilities, &Action::List, &ctx)
             .await
             .unwrap();
@@ -428,13 +440,7 @@ mod tests {
     async fn package_actions_gated_before_notimplemented() {
         let (caps, cfg, _path) = ctx_with(AllMissing);
         let env = test_env("ctx");
-        let ctx = ModuleCtx {
-            caps: &caps,
-            config: cfg.clone(),
-            as_user: "u",
-            jobs: &env.jobs,
-            principal: &env.principal,
-        };
+        let ctx = env.ctx(&caps, &cfg);
         let err = handle(ModuleId::PackagesNix, &Action::ListInstalled, &ctx)
             .await
             .unwrap_err();
@@ -448,13 +454,7 @@ mod tests {
         let (caps, mut cfg, _path) = ctx_with(AllMissing);
         cfg.modules.packages_nix = ursine_api::TriState::Off;
         let env = test_env("ctx");
-        let ctx = ModuleCtx {
-            caps: &caps,
-            config: cfg.clone(),
-            as_user: "u",
-            jobs: &env.jobs,
-            principal: &env.principal,
-        };
+        let ctx = env.ctx(&caps, &cfg);
         let err = handle(
             ModuleId::PackagesNix,
             &Action::Search {
@@ -472,13 +472,7 @@ mod tests {
     async fn invalid_module_action_combo_is_rejected() {
         let (caps, cfg, _path) = ctx_with(AllMissing);
         let env = test_env("ctx");
-        let ctx = ModuleCtx {
-            caps: &caps,
-            config: cfg.clone(),
-            as_user: "u",
-            jobs: &env.jobs,
-            principal: &env.principal,
-        };
+        let ctx = env.ctx(&caps, &cfg);
         let err = handle(
             ModuleId::System,
             &Action::Install {

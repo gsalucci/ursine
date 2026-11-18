@@ -186,11 +186,7 @@ fn validate_name(name: &str) -> Result<(), ApiError> {
 }
 
 fn tool(candidates: &[&'static str], label: &str, fix: &str) -> Result<&'static str, ApiError> {
-    candidates
-        .iter()
-        .find(|path| Path::new(path).is_file())
-        .copied()
-        .ok_or_else(|| ApiError::unavailable(format!("{label} not found"), fix))
+    crate::tooling::resolve(candidates, label, fix)
 }
 
 async fn run(
@@ -204,15 +200,20 @@ async fn run(
         .map(|output| output.stdout)
 }
 
+/// The `rc-service`/`dinitctl` verb for a start/stop/restart operation.
+fn service_verb(op: ServiceOp) -> &'static str {
+    match op {
+        ServiceOp::Start => "start",
+        ServiceOp::Stop => "stop",
+        ServiceOp::Restart => "restart",
+        ServiceOp::Enable | ServiceOp::Disable => unreachable!("not a verb operation"),
+    }
+}
+
 async fn openrc_action(name: &str, op: ServiceOp) -> Result<(), ApiError> {
     match op {
         ServiceOp::Start | ServiceOp::Stop | ServiceOp::Restart => {
-            let verb = match op {
-                ServiceOp::Start => "start",
-                ServiceOp::Stop => "stop",
-                ServiceOp::Restart => "restart",
-                ServiceOp::Enable | ServiceOp::Disable => unreachable!(),
-            };
+            let verb = service_verb(op);
             run(&RC_SERVICE, &[name, verb], "OpenRC", "apk add openrc").await?;
         }
         ServiceOp::Enable => {
@@ -234,12 +235,7 @@ async fn openrc_action(name: &str, op: ServiceOp) -> Result<(), ApiError> {
 async fn dinit_action(name: &str, op: ServiceOp) -> Result<(), ApiError> {
     match op {
         ServiceOp::Start | ServiceOp::Stop | ServiceOp::Restart => {
-            let verb = match op {
-                ServiceOp::Start => "start",
-                ServiceOp::Stop => "stop",
-                ServiceOp::Restart => "restart",
-                ServiceOp::Enable | ServiceOp::Disable => unreachable!(),
-            };
+            let verb = service_verb(op);
             run(&DINITCTL, &[verb, name], "dinit", "apk add dinit").await?;
         }
         ServiceOp::Enable => {

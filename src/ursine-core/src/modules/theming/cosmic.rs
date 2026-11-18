@@ -336,34 +336,12 @@ fn apply_alpha(container: &mut Value, alpha: &str) {
 mod tests {
     #![allow(clippy::disallowed_methods)] // tests use the host temp dir
     use super::*;
-    use ursine_api::{ThemeColors, ThemeFonts, ThemeSource};
-
     fn snapshot() -> ThemeSnapshot {
-        ThemeSnapshot {
-            source: ThemeSource::Dms,
-            name: "green".into(),
-            dark: true,
-            colors: ThemeColors {
-                background: "#10140f".into(),
-                foreground: "#e0e4db".into(),
-                primary: "#4caf50".into(),
-                secondary: "#2e7d32".into(),
-                surface: "#1b1f19".into(),
-                error: "#f2b8b5".into(),
-                success: "#4daf4c".into(),
-                warning: "#dacb52".into(),
-                outline: "#35a639".into(),
-            },
-            fonts: ThemeFonts {
-                ui: "Inter Variable".into(),
-                mono: "Fira Code".into(),
-                weight: 400,
-                scale: 1.0,
-            },
-            corner_radius: Some(12),
-            icon_theme: None,
-            cursor: None,
-        }
+        serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/theme-snapshot.json"
+        )))
+        .expect("theme fixture parses")
     }
 
     #[test]

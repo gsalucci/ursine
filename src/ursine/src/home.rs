@@ -1,12 +1,8 @@
 //! Home screen: the modules this principal may use, and what the machine offers.
 
-use cosmic::iced::Length;
-use cosmic::widget::selectable_text;
-use cosmic::widget::{button, column, row, scrollable, settings, text};
-use cosmic::Element;
+use crate::prelude::*;
 use ursine_api::{Capability, CapabilityReport, ModuleId, ModulesConfig, TriState};
 
-use crate::app::Message;
 use crate::client::SystemStatus;
 
 #[derive(Default)]
@@ -172,14 +168,7 @@ impl HomeState {
         expires_in_secs: u64,
         module_config: Option<&ModulesConfig>,
     ) -> Element<'_, Message> {
-        let header = row(vec![
-            text::title2("Overview").into(),
-            text("").width(Length::Fill).into(),
-        ])
-        .spacing(12)
-        .width(Length::Fill);
-
-        let mut items: Vec<Element<'_, Message>> = vec![header.into()];
+        let mut items = vec![ui::header_with("Overview", Vec::new())];
         items.push(text(format!("session lifetime: {} min", expires_in_secs / 60)).into());
         if let Some(status) = &self.status {
             items.push(

@@ -4,6 +4,14 @@
 
 ### Changed
 
+- **Release acceptance is the only host interaction** (user decision):
+  `scripts/test-host.sh` replaces `scripts/build-gui-dev.sh` and
+  `nix/dev-flake.nix`, which ran `nix run` on the host and violated the
+  container-only rule. The new script runs after the tag is published and
+  never reads the repository: it registers/refreshes `flake:ursine`, installs
+  the published GitHub flake (or upgrades the profile element), requires the
+  installed version to match the published one, runs `sudo ursine-activate`,
+  then checks the live service and `ursinectl system status`.
 - **Authentication is now the Webmin pattern** (user decision): the
   daemon verifies user+password directly against `/etc/shadow` in-process
   (`pwhash`, pure Rust) — no PAM, no C libraries, no cargo features.
@@ -17,6 +25,37 @@
   `scripts/dev.sh check` and the CI `test` job — the feature matrix and
   the separate GUI job are gone with the feature flags. `dev.sh fast`
   (scoped iteration gate) removed: every run tests everything.
+
+### CI
+
+- **One image, two jobs** (user decision): `ci/Containerfile` replaces the
+  dev/static/docs images. `verify` runs build, tests, static analysis, docs
+  and the release build in one job — push/PR discards the binary, a tag skips
+  the tests and publishes it. `nix` (nixos/nix) never builds or tests: PR/main
+  runs Nix lint + flake evaluation, a tag runs a fast tarball integrity smoke,
+  pins `nix/binary.nix` and attaches the flake source.
+- **All gates binding, maximum severity** (user decision): no report-only
+  layer and no finding threshold. Additions: source clone gate (`jscpd`,
+  50 tokens, threshold 0, Rust + shell); dependency duplicates are reported
+  into the run directory (`cargo tree -d`), never a committed baseline, since
+  every entry comes from the pinned libcosmic/iced graph. Advisories are
+  zero-tolerance through `cargo deny` and `cargo audit` (same RustSec DB,
+  `deny.toml` is the single source of ignores) with documented upstream-only
+  exceptions.
+- Dependencies: `rustix 1.1.6` (RUSTSEC-2026-0486), `async-executor 1.14.1`
+  and `clipboard-win 5.4.3` (yanked), and `serde_yaml`/`serde_yaml_ng`
+  replaced by `saphyr` (pure safe Rust) — the unmaintained `unsafe-libyaml`
+  is gone from the graph.
+- `scripts/package-release.sh` (release build + static contract + tarball) and
+  `scripts/smoke-installer.sh` (installer/activation smoke) extracted from CI;
+  `scripts/verify.sh` is the exact push/PR sequence.
+
+### Docs
+
+- Stale PAM references removed from `README.md`, `docs/PROJECT.md`,
+  `ROADMAP.md`, `docs/TASKS.md`, `docs/architecture/overview.md`,
+  `handoff/latest.md` and `.cargo/config.toml`; the obsolete Go-daemon /
+  PAM-helper design (`docs/architecture/go-daemon-future.md`) is deleted.
 
 ## [0.39.1] — 2026-11-17
 

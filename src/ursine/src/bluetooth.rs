@@ -1,12 +1,7 @@
 //! Bluetooth screen: adapter power, scan and device actions.
 
-use cosmic::iced::Length;
-use cosmic::widget::selectable_text;
-use cosmic::widget::{button, column, row, scrollable, settings, text, toggler};
-use cosmic::Element;
+use crate::prelude::*;
 use ursine_api::{BluetoothOp, BluetoothView};
-
-use crate::app::Message;
 
 #[derive(Default)]
 pub struct BluetoothState {
@@ -24,33 +19,24 @@ impl BluetoothState {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let mut items: Vec<Element<'_, Message>> = vec![row(vec![
-            text::title2("Bluetooth").into(),
-            text("").width(Length::Fill).into(),
-            button::text("Refresh")
-                .on_press_maybe(
-                    (!self.busy && !self.action_busy).then_some(Message::RefreshBluetooth),
-                )
-                .into(),
-            button::text("Scan")
-                .on_press_maybe((!self.busy && !self.action_busy).then_some(Message::BluetoothScan))
-                .into(),
-        ])
-        .spacing(12)
-        .width(Length::Fill)
-        .into()];
-
-        if let Some(error) = &self.error {
-            items.push(selectable_text(error.clone()).into());
-        }
-        if let Some(message) = &self.message {
-            items.push(text(message.clone()).into());
-        }
-        if self.busy {
-            items.push(text("Reading BlueZ…").into());
-        } else if self.action_busy {
-            items.push(text("Running Bluetooth action…").into());
-        }
+        let armed = !self.busy && !self.action_busy;
+        let mut items = vec![ui::header_with(
+            "Bluetooth",
+            vec![
+                button::text("Refresh")
+                    .on_press_maybe(armed.then_some(Message::RefreshBluetooth))
+                    .into(),
+                button::text("Scan")
+                    .on_press_maybe(armed.then_some(Message::BluetoothScan))
+                    .into(),
+            ],
+        )];
+        items.extend(ui::status(
+            self.error.as_ref(),
+            self.message.as_deref(),
+            self.busy.then_some("Reading BlueZ…"),
+            self.action_busy.then_some("Running Bluetooth action…"),
+        ));
 
         if let Some(view) = &self.view {
             items.push(

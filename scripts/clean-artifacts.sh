@@ -16,7 +16,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ART="$ROOT/artifacts"
 KEEP=3
 IMG_NIX="nixos/nix"
-IMG_RUST="rust:alpine"
+IMG_RUST="ursine-ci:1"
 
 die() {
   echo "ERROR: $1" >&2

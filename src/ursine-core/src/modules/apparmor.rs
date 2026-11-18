@@ -181,18 +181,10 @@ pub async fn handle(action: &Action, ctx: &ModuleCtx<'_>) -> Result<serde_json::
             Ok(json!(view(user).await?))
         }
         Action::ApparmorCleanprof { name } => {
-            let target = validate_target(name)?;
-            let program = tool(&AA_CLEANPROF, "aa-cleanprof")?;
-            rotate_profiles_dir(crate::backup_configs::copies_from(&ctx.config)).await?;
-            exec::run_root_program(program, &[&target], TIMEOUT).await?;
-            Ok(json!(view(user).await?))
+            run_profile_tool(ctx, user, name, &AA_CLEANPROF, "aa-cleanprof").await
         }
         Action::ApparmorAutodep { path } => {
-            let target = validate_target(path)?;
-            let program = tool(&AA_AUTODEP, "aa-autodep")?;
-            rotate_profiles_dir(crate::backup_configs::copies_from(&ctx.config)).await?;
-            exec::run_root_program(program, &[&target], TIMEOUT).await?;
-            Ok(json!(view(user).await?))
+            run_profile_tool(ctx, user, path, &AA_AUTODEP, "aa-autodep").await
         }
         Action::ApparmorFeaturesAbi => {
             let program = tool(&AA_FEATURES_ABI, "aa-features-abi")?;
@@ -256,6 +248,22 @@ pub async fn handle(action: &Action, ctx: &ModuleCtx<'_>) -> Result<serde_json::
 
 // ---- view ---------------------------------------------------------------
 
+/// The two per-profile tools share one path: validate the target, rotate the
+/// profile directory once, run the tool, answer with the fresh view.
+async fn run_profile_tool(
+    ctx: &ModuleCtx<'_>,
+    user: &str,
+    target: &str,
+    candidates: &[&'static str],
+    label: &str,
+) -> Result<serde_json::Value, ApiError> {
+    let target = validate_target(target)?;
+    let program = tool(candidates, label)?;
+    rotate_profiles_dir(crate::backup_configs::copies_from(&ctx.config)).await?;
+    exec::run_root_program(program, &[&target], TIMEOUT).await?;
+    Ok(json!(view(user).await?))
+}
+
 async fn view(user: &str) -> Result<ApparmorView, ApiError> {
     let status = aa_status().await?;
     let mut profiles = status.profiles;
@@ -271,7 +279,7 @@ async fn view(user: &str) -> Result<ApparmorView, ApiError> {
         processes_complain: status.processes_complain,
         notifications_configured: notify_configured(),
         notifications_autostart: autostart_present(user),
-        aa_notify_present: find(&AA_NOTIFY).is_some(),
+        aa_notify_present: crate::tooling::find(&AA_NOTIFY).is_some(),
     })
 }
 
@@ -574,7 +582,7 @@ async fn profile_set(path: &str, content: &str, copies: usize) -> Result<(), Api
         )));
     }
     crate::backup_configs::rotate_async(PathBuf::from(&path), copies, None).await?;
-    write_atomic(Path::new(&path), content)?;
+    crate::atomic::write(Path::new(&path), content)?;
     Ok(())
 }
 
@@ -585,7 +593,7 @@ async fn rotate_profiles_dir(copies: usize) -> Result<(), ApiError> {
 /// One button: `show_notifications="yes"` (line-surgical, backup first)
 /// + the aa-notify autostart entry for the session user.
 async fn notifications_enable(user: &str, copies: usize) -> Result<(), ApiError> {
-    if find(&AA_NOTIFY).is_none() {
+    if crate::tooling::find(&AA_NOTIFY).is_none() {
         return Err(ApiError::unavailable(
             "aa-notify is not installed",
             "apk add apparmor-utils",
@@ -605,7 +613,7 @@ async fn enable_notify_conf(copies: usize) -> Result<(), ApiError> {
     let updated = set_show_notifications(&current);
     if updated != current {
         crate::backup_configs::rotate_async(PathBuf::from(NOTIFY_CONF), copies, None).await?;
-        write_atomic(Path::new(NOTIFY_CONF), &updated)?;
+        crate::atomic::write(Path::new(NOTIFY_CONF), &updated)?;
     }
     Ok(())
 }
@@ -702,31 +710,6 @@ fn notify_configured() -> bool {
 /// time — concurrent sets would race the tmp file and the slots).
 static SET_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-fn write_atomic(path: &Path, text: &str) -> Result<(), ApiError> {
-    use std::os::unix::fs::PermissionsExt;
-    // Full file name in the temp name: `usr.bin.foo` and `usr.bin.bar`
-    // must never share a temp path inside one process.
-    let file_name = path.file_name().map_or_else(
-        || "profile".to_string(),
-        |n| n.to_string_lossy().into_owned(),
-    );
-    let tmp = path.with_file_name(format!("{file_name}.ursine-new.{}", std::process::id()));
-    let cleanup = |error: ApiError| -> ApiError {
-        let _ = std::fs::remove_file(&tmp);
-        error
-    };
-    std::fs::write(&tmp, text)
-        .map_err(|e| cleanup(ApiError::internal(format!("write {}: {e}", tmp.display()))))?;
-    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o644))
-        .map_err(|e| cleanup(ApiError::internal(format!("chmod {}: {e}", tmp.display()))))?;
-    std::fs::rename(&tmp, path).map_err(|e| {
-        cleanup(ApiError::internal(format!(
-            "replace {}: {e}",
-            path.display()
-        )))
-    })
-}
-
 fn combine(stdout: &str, stderr: &str) -> String {
     let mut out = String::new();
     for stream in [stdout, stderr] {
@@ -743,19 +726,12 @@ fn combine(stdout: &str, stderr: &str) -> String {
 }
 
 fn tool(candidates: &[&'static str], label: &str) -> Result<&'static str, ApiError> {
-    find(candidates).ok_or_else(|| {
+    crate::tooling::find(candidates).ok_or_else(|| {
         ApiError::unavailable(
             format!("{label} not found"),
             "apk add apparmor apparmor-utils",
         )
     })
-}
-
-fn find(candidates: &[&'static str]) -> Option<&'static str> {
-    candidates
-        .iter()
-        .find(|path| Path::new(path).is_file())
-        .copied()
 }
 
 #[cfg(test)]

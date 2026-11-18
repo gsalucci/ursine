@@ -115,11 +115,7 @@ pub(super) fn write_owned(
         Ok(())
     })();
     if let Err(error) = result {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(ApiError::internal(format!(
-            "write {}: {error}",
-            path.display()
-        )));
+        return Err(write_failure(path, &tmp, &error));
     }
     // Rotate the live file BEFORE the swap (owner-aware: backups live in
     // the user home); a rotation failure aborts and removes the temp so
@@ -133,11 +129,7 @@ pub(super) fn write_owned(
         Ok(())
     })();
     if let Err(error) = result {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(ApiError::internal(format!(
-            "write {}: {error}",
-            path.display()
-        )));
+        return Err(write_failure(path, &tmp, &error));
     }
     Ok(())
 }
@@ -234,13 +226,11 @@ pub(super) fn merge_ini(existing: &str, section: &str, updates: &[(&str, &str)])
             }
         }
     } else if !section_done {
-        if !out.is_empty() && out.last().is_some_and(|l| !l.trim().is_empty()) {
-            out.push(String::new());
-        }
-        out.push(header);
-        for (key, value) in updates {
-            out.push(format!("{key}={value}"));
-        }
+        push_section(
+            &mut out,
+            &header,
+            updates.iter().map(|(key, value)| format!("{key}={value}")),
+        );
     }
 
     let mut text = out.join("\n");
@@ -372,6 +362,40 @@ fn drop_trailing_commas(input: &str) -> String {
 
 /// Replace (or append) a marked block delimited by `begin`/`end` markers.
 ///
+/// Turn a failed temp-file step into the module error, dropping the temp so
+/// neither a partial temp nor a half-written live file survives.
+fn write_failure(path: &Path, tmp: &Path, error: &std::io::Error) -> ApiError {
+    let _ = std::fs::remove_file(tmp);
+    ApiError::internal(format!("write {}: {error}", path.display()))
+}
+
+/// Append one managed block; the body bytes are kept, only the closing
+/// newline is ensured before the end marker.
+fn push_block(out: &mut String, begin: &str, end: &str, body: &str) {
+    out.push_str(begin);
+    out.push('\n');
+    out.push_str(body);
+    if !body.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(end);
+    out.push('\n');
+}
+
+/// Append a missing section: one blank line after existing content (none at
+/// the top of the file), the header, then the body lines.
+fn push_section<T: Into<String>>(
+    out: &mut Vec<String>,
+    header: &str,
+    lines: impl IntoIterator<Item = T>,
+) {
+    if !out.is_empty() && out.last().is_some_and(|l| !l.trim().is_empty()) {
+        out.push(String::new());
+    }
+    out.push(header.to_string());
+    out.extend(lines.into_iter().map(Into::into));
+}
+
 /// Only the FIRST balanced `begin`..`end` block is ours: a `begin` without a
 /// matching `end` leaves the file untouched (never eat user content), and
 /// anything after the first `end` passes through verbatim.
@@ -386,14 +410,7 @@ pub(super) fn replace_block(existing: &str, begin: &str, end: &str, body: &str) 
         if !out.is_empty() {
             out.push('\n');
         }
-        out.push_str(begin);
-        out.push('\n');
-        out.push_str(body);
-        if !body.ends_with('\n') {
-            out.push('\n');
-        }
-        out.push_str(end);
-        out.push('\n');
+        push_block(&mut out, begin, end, body);
         return out;
     };
     let stop = lines
@@ -410,14 +427,7 @@ pub(super) fn replace_block(existing: &str, begin: &str, end: &str, body: &str) 
         out.push_str(line);
         out.push('\n');
     }
-    out.push_str(begin);
-    out.push('\n');
-    out.push_str(body);
-    if !body.ends_with('\n') {
-        out.push('\n');
-    }
-    out.push_str(end);
-    out.push('\n');
+    push_block(&mut out, begin, end, body);
     for line in lines.iter().skip(stop + 1) {
         out.push_str(line);
         out.push('\n');
@@ -457,13 +467,7 @@ pub(super) fn replace_ini_section(existing: &str, section: &str, body: &str) -> 
         }
     }
     if !seen {
-        if !out.is_empty() && out.last().is_some_and(|l| !l.trim().is_empty()) {
-            out.push(String::new());
-        }
-        out.push(header);
-        for body_line in body.lines() {
-            out.push(body_line.to_string());
-        }
+        push_section(&mut out, &header, body.lines());
     }
     let mut text = out.join("\n");
     if !text.ends_with('\n') {

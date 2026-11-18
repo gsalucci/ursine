@@ -1,12 +1,8 @@
 //! Settings screen: live capability facts and manual module switches.
 
-use cosmic::iced::Length;
-use cosmic::widget::selectable_text;
-use cosmic::widget::{button, column, row, scrollable, settings, text};
-use cosmic::Element;
+use crate::prelude::*;
 use ursine_api::{CapabilityReport, ModuleId, TriState};
 
-use crate::app::Message;
 use crate::client::ConfigSnapshot;
 
 #[derive(Default)]
@@ -99,14 +95,7 @@ impl SettingsState {
         caps_busy: bool,
         caps_error: Option<&'a str>,
     ) -> Element<'a, Message> {
-        let header = row(vec![
-            text::title2("Settings").into(),
-            text("").width(Length::Fill).into(),
-        ])
-        .spacing(12)
-        .width(Length::Fill);
-
-        let mut items: Vec<Element<'_, Message>> = vec![header.into()];
+        let mut items = vec![ui::header_with("Settings", Vec::new())];
 
         if let Some(error) = caps_error {
             items.push(selectable_text(error).into());

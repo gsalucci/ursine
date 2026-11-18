@@ -561,6 +561,24 @@ mod tests {
         Principal::local("skea999", vec!["wheel".into()])
     }
 
+    /// Start one job and wait for it; the worker closure is the only
+    /// variation across the failure-mode tests.
+    async fn run_worker<F, Fut>(
+        jobs: &JobRegistry,
+        module: ModuleId,
+        action: &str,
+        worker: F,
+    ) -> JobOutput
+    where
+        F: FnOnce(Arc<JobSink>) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<i32, ApiError>> + Send + 'static,
+    {
+        let started = jobs
+            .start(module, action, &principal(), None, worker)
+            .unwrap();
+        wait_done(jobs, &started.job_id).await
+    }
+
     async fn wait_done(jobs: &JobRegistry, id: &str) -> JobOutput {
         for _ in 0..200 {
             let out = jobs.output(&principal(), id, 0).unwrap();
@@ -702,16 +720,10 @@ mod tests {
     #[tokio::test]
     async fn failed_job_logs_error_and_has_no_exit_code() {
         let (jobs, _clock) = registry("fail");
-        let started = jobs
-            .start(
-                ModuleId::PackagesNix,
-                "install",
-                &principal(),
-                Some("alice"),
-                |_| async { Err(ApiError::internal("spawn command: no such file")) },
-            )
-            .unwrap();
-        let out = wait_done(&jobs, &started.job_id).await;
+        let out = run_worker(&jobs, ModuleId::PackagesNix, "install", |_| async {
+            Err(ApiError::internal("spawn command: no such file"))
+        })
+        .await;
         assert_eq!(out.status, JobStatus::Done);
         assert!(out.exit_code.is_none());
         assert!(out.lines.contains("error: spawn command: no such file"));
@@ -783,19 +795,11 @@ mod tests {
     #[tokio::test]
     async fn panicking_worker_is_closed_by_the_monitor() {
         let (jobs, _clock) = registry("panic");
-        let started = jobs
-            .start(
-                ModuleId::PackagesNix,
-                "install",
-                &principal(),
-                None,
-                |_| async {
-                    // Tail `panic!` coerces to the future's Result output.
-                    panic!("simulated worker bug")
-                },
-            )
-            .unwrap();
-        let out = wait_done(&jobs, &started.job_id).await;
+        let out = run_worker(&jobs, ModuleId::PackagesNix, "install", |_| async {
+            // Tail `panic!` coerces to the future's Result output.
+            panic!("simulated worker bug")
+        })
+        .await;
         assert_eq!(out.status, JobStatus::Done);
         assert!(out.exit_code.is_none());
         assert!(out.lines.contains("job worker failed"), "{}", out.lines);

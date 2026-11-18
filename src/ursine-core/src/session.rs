@@ -37,6 +37,18 @@ impl TokenStore {
         }
     }
 
+    /// Lock the store and drop expired sessions in the same pass every
+    /// operation needs; returns `now` plus the live map.
+    fn live(&self) -> (u64, std::sync::MutexGuard<'_, HashMap<String, Session>>) {
+        let now = self.clock.now_millis();
+        let mut sessions = self
+            .sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        sessions.retain(|_, s| !self.expired(s, now));
+        (now, sessions)
+    }
+
     /// Issue a fresh 256-bit token for the principal. Returns (token, ttl secs).
     ///
     /// # Panics
@@ -52,12 +64,7 @@ impl TokenStore {
             let _ = write!(token, "{byte:02x}");
         }
 
-        let now = self.clock.now_millis();
-        let mut sessions = self
-            .sessions
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        sessions.retain(|_, s| !self.expired(s, now));
+        let (now, mut sessions) = self.live();
         sessions.insert(
             token.clone(),
             Session {
@@ -70,12 +77,7 @@ impl TokenStore {
 
     /// Validate a token and slide its TTL. Returns the principal when valid.
     pub fn validate(&self, token: &SessionToken) -> Option<Principal> {
-        let now = self.clock.now_millis();
-        let mut sessions = self
-            .sessions
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        sessions.retain(|_, s| !self.expired(s, now));
+        let (now, mut sessions) = self.live();
         let session = sessions.get_mut(token.as_str())?;
         session.last_seen_millis = now;
         Some(session.principal.clone())
@@ -83,11 +85,7 @@ impl TokenStore {
 
     /// Number of live sessions (tests/diagnostics).
     pub fn len(&self) -> usize {
-        let now = self.clock.now_millis();
-        let sessions = self
-            .sessions
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (now, sessions) = self.live();
         sessions.values().filter(|s| !self.expired(s, now)).count()
     }
 

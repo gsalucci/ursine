@@ -1,5 +1,5 @@
 #!/bin/sh
-# Canonical documentation check. Run inside ursine-docs:1.
+# Canonical documentation check. Run inside ursine-ci:1.
 set -u
 
 ROOT=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)

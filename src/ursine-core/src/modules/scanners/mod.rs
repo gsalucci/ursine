@@ -102,16 +102,22 @@ fn parse_devices(output: &str) -> Vec<Scanner> {
         .collect()
 }
 
+/// The airscan config must be a regular file: never follow a planted symlink.
+fn config_meta(path: &Path) -> Result<std::fs::Metadata, ApiError> {
+    let meta = std::fs::symlink_metadata(path)
+        .map_err(|e| ApiError::internal(format!("inspect airscan config: {e}")))?;
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return Err(ApiError::invalid("airscan config is not a regular file"));
+    }
+    Ok(meta)
+}
+
 fn read_config() -> Result<AirscanConfig, ApiError> {
     let path = config_path();
     if !path.exists() {
         return Ok(AirscanConfig::default());
     }
-    let meta = std::fs::symlink_metadata(&path)
-        .map_err(|e| ApiError::internal(format!("inspect airscan config: {e}")))?;
-    if meta.file_type().is_symlink() || !meta.is_file() {
-        return Err(ApiError::invalid("airscan config is not a regular file"));
-    }
+    config_meta(&path)?;
     let text = std::fs::read_to_string(&path)
         .map_err(|e| ApiError::internal(format!("read airscan config: {e}")))?;
     Ok(parse_config(&text))
@@ -162,11 +168,7 @@ fn write_config(config: &AirscanConfig, copies: usize) -> Result<(), ApiError> {
     std::fs::create_dir_all(parent)
         .map_err(|e| ApiError::internal(format!("create sane config dir: {e}")))?;
     if path.exists() {
-        let meta = std::fs::symlink_metadata(&path)
-            .map_err(|e| ApiError::internal(format!("inspect airscan config: {e}")))?;
-        if meta.file_type().is_symlink() || !meta.is_file() {
-            return Err(ApiError::invalid("airscan config is not a regular file"));
-        }
+        config_meta(&path)?;
         // Uniform rotation (replaces the old unbounded timestamped copies;
         // legacy ones are pruned inside rotate).
         crate::backup_configs::rotate(&path, copies, None)?;
@@ -225,11 +227,7 @@ fn validate_protocol(protocol: &str) -> Result<(), ApiError> {
 }
 
 fn tool(candidates: &[&'static str], label: &str) -> Result<&'static str, ApiError> {
-    candidates
-        .iter()
-        .find(|path| Path::new(path).is_file())
-        .copied()
-        .ok_or_else(|| ApiError::unavailable(format!("{label} not found"), "apk add sane-utils"))
+    crate::tooling::resolve(candidates, label, "apk add sane-utils")
 }
 
 fn nanos() -> u128 {

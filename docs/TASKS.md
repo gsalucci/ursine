@@ -1,7 +1,7 @@
 # Tasks — Ursine
 
 **Milestone**: v0.39.0 — perf + modals everywhere (2026-11-16)
-**Updated**: 2026-11-16
+**Updated**: 2026-11-18
 **Workflow rule (binding)**: backend first, frontend immediately, same feature. No next feature until daemon + frontend reach parity.
 **UI rule (binding)**: patterns from cosmic-settings (structure), Webmin (action coverage), Cockpit (gating/status/confirmations).
 
@@ -15,7 +15,7 @@
 - [x] Niri version detection gates validate/save.
 - [x] Niri compatibility range and field-level validation errors. Range: parsed `niri --version` vs tested floor `25.05` (`version_parsed`/`version_supported`/`min_supported` in the view, GUI Compatibility warning). Field errors: miette stderr → `{message,line,column,section,field}` mapped to the proposed config; GUI renders the list, `ursinectl` exits 1 on `valid=false` (guide + man updated).
 - [x] Niri animations: slowdown, window-open/close duration + curve.
-- [ ] APKBUILDs in `feralos-aports`; real FeralOS PAM/activation/module smoke.
+- [ ] APKBUILDs in `feralos-aports`; real FeralOS activation/module smoke.
 - [ ] v1.0 tag after the above.
 
 #### v2 required detail
@@ -206,6 +206,8 @@
 | Nix flake full build never run locally (eval only) | open | first CI run validates; CI flake job is the gate |
 | Shadow auth path not yet tested on a FeralOS target | open | fixture-based unit tests green in CI; log in with a real user on FeralOS before v1.0 |
 | Full init activation not tested | open | `systemd-analyze verify` green, `dinitcheck` green; OpenRC start blocked by container read-only cgroups. Run on a disposable VM/real target. |
+| `scripts/test-host.sh` never executed (host acceptance) | open | run it after the next tag: registry entry, published-flake refresh, profile upgrade/install, `sudo ursine-activate`, version/service/`ursinectl` checks |
+| Duplicate crate versions in the dependency graph (90) | resolved (report) | all from the pinned libcosmic/iced graph; `cargo tree -d` stays a report in the run dir, never a committed baseline |
 | Tag release publish/auto-pin/verify-pin | resolved | `v0.3.0` run `39452993223` green; release assets + flake archive published; `nix/binary.nix` pinned in `bdbf6ce`; `verify-pin` green |
 | `.opencode/package.json` + lock tracked while `.opencode/.gitignore` exists | resolved | ignore lines dropped; files tracked intentionally |
 | Agent fixes (hidden/quote/no-model) diverge from skea-store template | open | promote upstream when skea999 decides |

@@ -1,6 +1,6 @@
 //! Propagation writers: one pass over every target, each result reported.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use ursine_api::{
     ApiError, ApplyOutcome, TargetResult, TargetStatus, ThemeApplyReport, ThemeSnapshot,
@@ -125,6 +125,14 @@ fn write_target(
     }
 }
 
+/// Every config-directory target starts the same way: resolve
+/// `~/.config/<dir>` and create it owned by the user.
+fn config_dir(home: &Path, dir_name: &str, uid: u32, gid: u32) -> Result<PathBuf, ApiError> {
+    let dir = home.join(".config").join(dir_name);
+    mkdir_owned(home, &dir, uid, gid)?;
+    Ok(dir)
+}
+
 /// GTK3/GTK4: `settings.ini` (theme/font/icon/cursor) + colors CSS.
 /// An existing `gtk.css` without our marker (shell or hand-written) is never
 /// clobbered — no matter which source won.
@@ -138,8 +146,7 @@ fn gtk_settings(
     dir_name: &str,
     copies: usize,
 ) -> Result<Applied, ApiError> {
-    let dir = home.join(".config").join(dir_name);
-    mkdir_owned(home, &dir, uid, gid)?;
+    let dir = config_dir(home, dir_name, uid, gid)?;
 
     // adw-gtk3-dark is the complete GTK3 theme present on FeralOS-like
     // systems and it consumes the window_*/accent_* names our css overrides
@@ -383,8 +390,7 @@ fn qtct(
     dir_name: &str,
     copies: usize,
 ) -> Result<Applied, ApiError> {
-    let dir = home.join(".config").join(dir_name);
-    mkdir_owned(home, &dir, uid, gid)?;
+    let dir = config_dir(home, dir_name, uid, gid)?;
     let scheme = format!("ursine-{}", snap.source.as_str());
     let colors_path = dir.join("colors").join(format!("{scheme}.conf"));
     let colors_dir = colors_path
@@ -672,34 +678,18 @@ mod tests {
     use ursine_api::ThemeSource;
 
     fn snapshot(source: ThemeSource) -> ThemeSnapshot {
-        ThemeSnapshot {
-            source,
-            name: "green".into(),
-            dark: true,
-            colors: ursine_api::ThemeColors {
-                background: "#10140f".into(),
-                foreground: "#e0e4db".into(),
-                primary: "#4caf50".into(),
-                secondary: "#2e7d32".into(),
-                surface: "#1b1f19".into(),
-                error: "#f2b8b5".into(),
-                success: "#4daf4c".into(),
-                warning: "#dacb52".into(),
-                outline: "#35a639".into(),
-            },
-            fonts: ursine_api::ThemeFonts {
-                ui: "Inter Variable".into(),
-                mono: "Fira Code".into(),
-                weight: 400,
-                scale: 1.0,
-            },
-            corner_radius: Some(12),
-            icon_theme: Some("Papirus".into()),
-            cursor: Some(ursine_api::CursorTheme {
-                name: "Bibata".into(),
-                size: 24,
-            }),
-        }
+        let mut snapshot: ThemeSnapshot = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/theme-snapshot.json"
+        )))
+        .expect("theme fixture parses");
+        snapshot.source = source;
+        snapshot.icon_theme = Some("Papirus".into());
+        snapshot.cursor = Some(ursine_api::CursorTheme {
+            name: "Bibata".into(),
+            size: 24,
+        });
+        snapshot
     }
 
     fn wrote(applied: Applied) -> String {
@@ -716,7 +706,7 @@ mod tests {
         }
     }
 
-    fn temp_home(tag: &str) -> std::path::PathBuf {
+    fn temp_home(tag: &str) -> PathBuf {
         let home = std::env::temp_dir().join(format!("ursine-apply-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(&home).unwrap();

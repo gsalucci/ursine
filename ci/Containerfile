@@ -1,0 +1,41 @@
+# Ursine CI/dev image (Alpine 3.24, musl). ONE image: build, tests, static
+# analysis, docs and release packaging all run here. Ursine is not a container
+# app — this image only produces the binaries in the best conditions.
+#
+# The Nix packaging job is the only other container (nixos/nix): it receives
+# the release tarball and wraps it in the flake, without building or testing.
+#
+#   podman build -t ursine-ci:1 -f ci/Containerfile .
+#   podman run --rm --network=host -v "$PWD:/work" -w /work \
+#     -e CARGO_HOME=/work/artifacts/cargo-home ursine-ci:1 sh scripts/verify.sh
+FROM alpine:3.24
+
+RUN apk add --no-cache \
+    bash ca-certificates curl git nodejs npm tar \
+    build-base openssl-dev pkgconf \
+    cmake fontconfig-dev freetype-dev libxkbcommon-dev expat-dev \
+    rustup \
+    cargo-deny cargo-audit cargo-cyclonedx \
+    typos taplo zizmor actionlint shellcheck shfmt editorconfig-checker \
+    && rm -rf /var/cache/apk/*
+
+# edge/testing is tagged explicitly so it cannot silently upgrade unrelated
+# 3.24 packages.
+RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/testing" >> /etc/apk/repositories
+
+RUN apk add --no-cache \
+    cargo-geiger@edge cargo-machete@edge gitleaks@edge \
+    && rm -rf /var/cache/apk/*
+
+# Pinned toolchain, same as rust-toolchain.toml. Alpine ships rustup-init.
+RUN rustup-init -y --no-modify-path --profile minimal \
+    --default-toolchain 1.99.1 -c clippy -c rustfmt
+
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Pinned npm tools: clone detection (our-source gate) and docs lint.
+RUN npm install -g jscpd@4.3.0 markdownlint-cli2@0.24.0 \
+    && npm cache clean --force
+
+# Keep build output inside the mounted workspace.
+ENV CARGO_TARGET_DIR=/work/artifacts/target

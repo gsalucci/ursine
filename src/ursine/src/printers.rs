@@ -1,12 +1,8 @@
 //! Printers screen: CUPS printers and queued jobs.
 
-use cosmic::iced::Length;
-use cosmic::widget::selectable_text;
-use cosmic::widget::{button, column, row, scrollable, settings, text, text_input};
-use cosmic::Element;
+use crate::prelude::*;
 use ursine_api::{PrintJob, Printer};
 
-use crate::app::Message;
 use crate::package_ui::{text_row, ConfirmVm};
 
 #[derive(Default)]
@@ -38,30 +34,16 @@ impl PrintersState {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let mut items: Vec<Element<'_, Message>> = vec![row(vec![
-            text::title2("Printers").into(),
-            text("").width(Length::Fill).into(),
-            button::text("Refresh")
-                .on_press_maybe(
-                    (!self.busy && !self.action_busy).then_some(Message::RefreshPrinters),
-                )
-                .into(),
-        ])
-        .spacing(12)
-        .width(Length::Fill)
-        .into()];
-
-        if let Some(error) = &self.error {
-            items.push(selectable_text(error.clone()).into());
-        }
-        if let Some(message) = &self.message {
-            items.push(text(message.clone()).into());
-        }
-        if self.busy {
-            items.push(text("Reading CUPS state…").into());
-        } else if self.action_busy {
-            items.push(text("Running printer action…").into());
-        }
+        let mut items = vec![ui::header(
+            "Printers",
+            (!self.busy && !self.action_busy).then_some(Message::RefreshPrinters),
+        )];
+        items.extend(ui::status(
+            self.error.as_ref(),
+            self.message.as_deref(),
+            self.busy.then_some("Reading CUPS state…"),
+            self.action_busy.then_some("Running printer action…"),
+        ));
 
         let mut printers = settings::section().title(format!("Printers ({})", self.printers.len()));
         if self.printers.is_empty() {

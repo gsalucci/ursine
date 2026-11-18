@@ -20,6 +20,7 @@ mod network;
 mod niri;
 mod package_ui;
 mod packages;
+mod prelude;
 mod printers;
 mod scanners;
 mod services;
@@ -27,6 +28,7 @@ mod settings;
 mod snapshots;
 mod store;
 mod theming;
+mod ui;
 mod users;
 
 use cosmic::app::Settings;

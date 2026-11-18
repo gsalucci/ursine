@@ -1,13 +1,9 @@
 //! Theming screen: uniform desktop theme from the shell config (SPEC-theming).
 
+use crate::prelude::*;
 use cosmic::iced::widget::container::Style as ContainerStyle;
-use cosmic::iced::Length;
-use cosmic::widget::selectable_text;
-use cosmic::widget::{button, column, container, row, scrollable, settings, text, toggler};
-use cosmic::Element;
 use ursine_api::{ThemeApplyReport, ThemeSnapshot, ThemingStatus};
 
-use crate::app::Message;
 use crate::package_ui::{text_row, ConfirmVm};
 
 #[derive(Default)]
@@ -28,28 +24,17 @@ pub struct ThemingState {
 
 impl ThemingState {
     pub fn view(&self) -> Element<'_, Message> {
-        let mut items: Vec<Element<'_, Message>> = vec![row(vec![
-            text::title2("Theming").into(),
-            text("").width(Length::Fill).into(),
-            button::text("Refresh")
-                .on_press_maybe((!self.busy && !self.apply_busy).then_some(Message::OpenTheming))
-                .into(),
-        ])
-        .spacing(12)
-        .width(Length::Fill)
-        .into()];
-
-        if let Some(error) = &self.error {
-            items.push(selectable_text(error.clone()).into());
-        }
-        if let Some(message) = &self.message {
-            items.push(text(message.clone()).into());
-        }
-        if self.busy {
-            items.push(text("Reading the shell theme…").into());
-        } else if self.apply_busy {
-            items.push(text("Applying the theme to every toolkit…").into());
-        }
+        let mut items = vec![ui::header(
+            "Theming",
+            (!self.busy && !self.apply_busy).then_some(Message::OpenTheming),
+        )];
+        items.extend(ui::status(
+            self.error.as_ref(),
+            self.message.as_deref(),
+            self.busy.then_some("Reading the shell theme…"),
+            self.apply_busy
+                .then_some("Applying the theme to every toolkit…"),
+        ));
 
         let Some(status) = &self.status else {
             // Only claim "no shell" when detect actually answered (a detect
@@ -270,37 +255,14 @@ impl ThemingState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ursine_api::{
-        ApplyOutcome, TargetResult, TargetStatus, ThemeColors, ThemeFonts, ThemeSource,
-        ThemingTarget,
-    };
+    use ursine_api::{ApplyOutcome, TargetResult, TargetStatus, ThemeSource, ThemingTarget};
 
     fn snapshot() -> ThemeSnapshot {
-        ThemeSnapshot {
-            source: ThemeSource::Dms,
-            name: "green".into(),
-            dark: true,
-            colors: ThemeColors {
-                background: "#10140f".into(),
-                foreground: "#e0e4db".into(),
-                primary: "#4caf50".into(),
-                secondary: "#2e7d32".into(),
-                surface: "#1b1f19".into(),
-                error: "#f2b8b5".into(),
-                success: "#4daf4c".into(),
-                warning: "#dacb52".into(),
-                outline: "#35a639".into(),
-            },
-            fonts: ThemeFonts {
-                ui: "Inter Variable".into(),
-                mono: "Fira Code".into(),
-                weight: 400,
-                scale: 1.0,
-            },
-            corner_radius: Some(12),
-            icon_theme: None,
-            cursor: None,
-        }
+        serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/theme-snapshot.json"
+        )))
+        .expect("theme fixture parses")
     }
 
     #[test]

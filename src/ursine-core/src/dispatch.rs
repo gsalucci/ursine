@@ -11,6 +11,7 @@ use ursine_api::{
 use crate::audit::{AuditLog, Outcome};
 use crate::auth::{AuthError, Authenticator, PeerInfo};
 use crate::capabilities::Registry;
+use crate::clock::Clock;
 use crate::jobs::JobRegistry;
 use crate::modules;
 use crate::ratelimit::RateLimiter;
@@ -43,6 +44,34 @@ pub struct Daemon {
     pub audit: Arc<AuditLog>,
     /// Package job registry (shared with module handlers).
     pub jobs: JobRegistry,
+}
+
+impl Daemon {
+    /// Build the shared daemon. The binaries resolve only the config path,
+    /// the authenticator, the audit log, the job registry and the clock;
+    /// every other field is one wiring rule and lives here.
+    pub fn assemble(
+        config_path: PathBuf,
+        config: ursine_api::UrsineConfig,
+        auth: Arc<dyn Authenticator>,
+        audit: Arc<AuditLog>,
+        jobs: JobRegistry,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
+        let ttl = Duration::from_secs(u64::from(config.token_ttl_min) * 60);
+        let rate = config.login_rate_limit_per_min;
+        Self {
+            config: tokio::sync::RwLock::new(config),
+            config_path,
+            caps: Registry::system(),
+            auth,
+            sessions: TokenStore::new(ttl, Arc::clone(&clock)),
+            ratelimit: RateLimiter::new(rate, clock),
+            auth_permits: Arc::new(tokio::sync::Semaphore::new(MAX_INFLIGHT_AUTH)),
+            audit,
+            jobs,
+        }
+    }
 }
 
 impl std::fmt::Debug for Daemon {

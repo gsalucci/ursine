@@ -1,14 +1,8 @@
 //! Snapshots screen: btrbk config dropdowns, list/stats/create, restore and delete.
 
-use cosmic::iced::Length;
-use cosmic::widget::selectable_text;
-use cosmic::widget::{
-    button, column, dropdown, row, scrollable, settings, text, text_input, toggler,
-};
-use cosmic::Element;
+use crate::prelude::*;
 use ursine_api::{BtrbkConfigView, BtrbkSettings, Snapshot, SnapshotStats};
 
-use crate::app::Message;
 use crate::client::SnapshotPage;
 use crate::package_ui::{text_row, ConfirmVm};
 
@@ -140,15 +134,23 @@ impl SnapSetting {
         )
     }
 
-    pub fn set_custom(self, settings: &mut BtrbkSettings, value: &str) {
-        let field = match self {
+    /// The six preserve fields share one editable target; every other kind
+    /// has no custom text.
+    fn preserve_field(self, settings: &mut BtrbkSettings) -> Option<&mut Option<String>> {
+        Some(match self {
             Self::SnapshotPreserveMin => &mut settings.snapshot_preserve_min,
             Self::SnapshotPreserve => &mut settings.snapshot_preserve,
             Self::TargetPreserveMin => &mut settings.target_preserve_min,
             Self::TargetPreserve => &mut settings.target_preserve,
             Self::ArchivePreserveMin => &mut settings.archive_preserve_min,
             Self::ArchivePreserve => &mut settings.archive_preserve,
-            _ => return,
+            _ => return None,
+        })
+    }
+
+    pub fn set_custom(self, settings: &mut BtrbkSettings, value: &str) {
+        let Some(field) = self.preserve_field(settings) else {
+            return;
         };
         *field = (!value.trim().is_empty()).then(|| value.trim().to_string());
     }
@@ -159,22 +161,20 @@ impl SnapSetting {
         } else {
             self.options().get(index).map(|value| (*value).to_string())
         };
-        let field = match self {
-            Self::TimestampFormat => &mut settings.timestamp_format,
-            Self::SnapshotCreate => &mut settings.snapshot_create,
-            Self::Incremental => &mut settings.incremental,
-            Self::SnapshotPreserveMin => &mut settings.snapshot_preserve_min,
-            Self::SnapshotPreserve => &mut settings.snapshot_preserve,
-            Self::TargetPreserveMin => &mut settings.target_preserve_min,
-            Self::TargetPreserve => &mut settings.target_preserve,
-            Self::ArchivePreserveMin => &mut settings.archive_preserve_min,
-            Self::ArchivePreserve => &mut settings.archive_preserve,
-            Self::PreserveHourOfDay => &mut settings.preserve_hour_of_day,
-            Self::PreserveDayOfWeek => &mut settings.preserve_day_of_week,
-            Self::StreamCompress => &mut settings.stream_compress,
-            Self::BtrfsCommitDelete => &mut settings.btrfs_commit_delete,
-        };
-        *field = value;
+        if let Some(field) = self.preserve_field(settings) {
+            *field = value;
+            return;
+        }
+        match self {
+            Self::TimestampFormat => settings.timestamp_format = value,
+            Self::SnapshotCreate => settings.snapshot_create = value,
+            Self::Incremental => settings.incremental = value,
+            Self::PreserveHourOfDay => settings.preserve_hour_of_day = value,
+            Self::PreserveDayOfWeek => settings.preserve_day_of_week = value,
+            Self::StreamCompress => settings.stream_compress = value,
+            Self::BtrfsCommitDelete => settings.btrfs_commit_delete = value,
+            _ => {}
+        }
     }
 }
 
@@ -220,25 +220,16 @@ impl SnapshotsState {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let mut items: Vec<Element<'_, Message>> = vec![row(vec![
-            text::title2("Snapshots (btrbk)").into(),
-            text("").width(Length::Fill).into(),
-            button::text("Refresh")
-                .on_press_maybe(
-                    (!self.busy && !self.action_busy).then_some(Message::RefreshSnapshots),
-                )
-                .into(),
-        ])
-        .spacing(12)
-        .width(Length::Fill)
-        .into()];
-
-        if let Some(error) = &self.error {
-            items.push(selectable_text(error.clone()).into());
-        }
-        if self.busy {
-            items.push(text("Reading btrbk state…").into());
-        }
+        let mut items = vec![ui::header(
+            "Snapshots (btrbk)",
+            (!self.busy && !self.action_busy).then_some(Message::RefreshSnapshots),
+        )];
+        items.extend(ui::status(
+            self.error.as_ref(),
+            None,
+            self.busy.then_some("Reading btrbk state…"),
+            None,
+        ));
         if self.action_busy {
             items.push(text("Running btrbk action…").into());
         }

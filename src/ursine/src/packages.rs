@@ -8,6 +8,61 @@ use ursine_api::{
 
 use crate::app::Message;
 
+/// Filter the source against precomputed keys (zero allocations per frame),
+/// then materialize only the requested page. Returns the filtered total.
+fn filtered_page<'a, T>(
+    items: &'a [T],
+    keys: &[String],
+    query: &str,
+    page: usize,
+) -> (usize, Vec<&'a T>) {
+    let matches: Vec<&T> = items
+        .iter()
+        .zip(keys.iter())
+        .filter(|(_, key)| crate::package_ui::contains_ci(key, query))
+        .map(|(item, _)| item)
+        .collect();
+    let len = matches.len();
+    let (_, _, start) = crate::package_ui::page_bounds(len, page);
+    let page = matches
+        .into_iter()
+        .skip(start)
+        .take(crate::package_ui::PAGE_SIZE)
+        .collect();
+    (len, page)
+}
+
+/// One installed/search row: identity, description, repository, actions.
+fn package_row<'a>(
+    name: &str,
+    version: &str,
+    description: Option<&String>,
+    repository: Option<String>,
+    actions: Vec<Element<'a, Message>>,
+) -> crate::package_ui::RowVm<'a> {
+    crate::package_ui::RowVm {
+        title: format!("{name} {version}"),
+        description: description
+            .map(String::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        repository,
+        notes: Vec::new(),
+        actions,
+    }
+}
+
+/// The Remove button every manager shows on an unprotected package.
+fn remove_button<'a>(kind: PackageKind, id: &str, armed: bool) -> Element<'a, Message> {
+    button::text("Remove")
+        .on_press_maybe(armed.then_some(Message::PackageRemoveRequested(
+            kind,
+            id.to_string(),
+            id.to_string(),
+        )))
+        .into()
+}
+
 /// Which regex action the Pattern section is confirming.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PatternOp {
@@ -297,7 +352,7 @@ impl PackagesState {
     ) -> crate::package_ui::PackageVm<'_> {
         use crate::package_ui::{
             page_bounds, text_row, ConfirmVm, FilterVm, ListVm, PackageVm, RefreshVm, RowVm,
-            SearchVm, SectionVm, UpgradeAllVm, UpgradeVm, PAGE_SIZE,
+            SearchVm, SectionVm, UpgradeAllVm, UpgradeVm,
         };
 
         let manager = match kind {
@@ -706,34 +761,12 @@ impl PackagesState {
         let filtering = !query.is_empty();
         let (matched, rows): (usize, Vec<RowVm<'_>>) = match kind {
             PackageKind::Apk => {
-                let matches: Vec<&ApkPackage> = self
-                    .apk
-                    .iter()
-                    .zip(self.filter_keys.iter())
-                    .filter(|(_, key)| crate::package_ui::contains_ci(key, query))
-                    .map(|(package, _)| package)
-                    .collect();
-                let len = matches.len();
-                let (_, _, start) = page_bounds(len, self.installed_page);
-                let rows = matches
+                let (len, page) =
+                    filtered_page(&self.apk, &self.filter_keys, query, self.installed_page);
+                let rows = page
                     .into_iter()
-                    .skip(start)
-                    .take(PAGE_SIZE)
-                    .map(|package| RowVm {
-                        title: format!("{} {}", package.name, package.version),
-                        description: package
-                            .description
-                            .as_deref()
-                            .filter(|value| !value.is_empty())
-                            .map(str::to_string),
-                        repository: package.origin.as_ref().map(|origin| {
-                            package.origin_label.as_ref().map_or_else(
-                                || origin.clone(),
-                                |label| format!("{label} · {origin}"),
-                            )
-                        }),
-                        notes: Vec::new(),
-                        actions: if self.searching {
+                    .map(|package| {
+                        let actions: Vec<Element<'_, Message>> = if self.searching {
                             vec![button::text("Install")
                                 .on_press_maybe(
                                     (!self.busy && !self.action_busy).then_some(
@@ -756,37 +789,34 @@ impl PackagesState {
                                         .into(),
                                 );
                             }
-                            buttons.push(
-                                button::text("Remove")
-                                    .on_press_maybe((!self.busy && !self.action_busy).then_some(
-                                        Message::PackageRemoveRequested(
-                                            kind,
-                                            package.name.clone(),
-                                            package.name.clone(),
-                                        ),
-                                    ))
-                                    .into(),
-                            );
+                            buttons.push(remove_button(
+                                kind,
+                                &package.name,
+                                !self.busy && !self.action_busy,
+                            ));
                             buttons
-                        },
+                        };
+                        package_row(
+                            &package.name,
+                            &package.version,
+                            package.description.as_ref(),
+                            package.origin.as_ref().map(|origin| {
+                                package.origin_label.as_ref().map_or_else(
+                                    || origin.clone(),
+                                    |label| format!("{label} · {origin}"),
+                                )
+                            }),
+                            actions,
+                        )
                     })
                     .collect();
                 (len, rows)
             }
             PackageKind::Flatpak => {
-                let matches: Vec<&FlatpakPackage> = self
-                    .flatpak
-                    .iter()
-                    .zip(self.filter_keys.iter())
-                    .filter(|(_, key)| crate::package_ui::contains_ci(key, query))
-                    .map(|(package, _)| package)
-                    .collect();
-                let len = matches.len();
-                let (_, _, start) = page_bounds(len, self.installed_page);
-                let rows = matches
+                let (len, page) =
+                    filtered_page(&self.flatpak, &self.filter_keys, query, self.installed_page);
+                let rows = page
                     .into_iter()
-                    .skip(start)
-                    .take(PAGE_SIZE)
                     .map(|package| {
                         let mut identity: Vec<&str> = vec![package.app_id.as_str()];
                         if !package.branch.is_empty() {
@@ -833,30 +863,20 @@ impl PackagesState {
                                         .into(),
                                 );
                             }
-                            buttons.push(
-                                button::text("Remove")
-                                    .on_press_maybe((!self.busy && !self.action_busy).then_some(
-                                        Message::PackageRemoveRequested(
-                                            kind,
-                                            package.app_id.clone(),
-                                            package.app_id.clone(),
-                                        ),
-                                    ))
-                                    .into(),
-                            );
+                            buttons.push(remove_button(
+                                kind,
+                                &package.app_id,
+                                !self.busy && !self.action_busy,
+                            ));
                             buttons
                         };
-                        RowVm {
-                            title: format!("{} {}", package.name, package.version),
-                            description: package
-                                .description
-                                .as_deref()
-                                .filter(|value| !value.is_empty())
-                                .map(str::to_string),
-                            repository: Some(line),
-                            notes: Vec::new(),
+                        package_row(
+                            &package.name,
+                            &package.version,
+                            package.description.as_ref(),
+                            Some(line),
                             actions,
-                        }
+                        )
                     })
                     .collect();
                 (len, rows)

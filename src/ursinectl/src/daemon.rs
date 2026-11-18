@@ -8,16 +8,9 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
-use ursine_core::audit::AuditLog;
-use ursine_core::auth::{AuthError, Authenticator, PeerInfo};
-use ursine_core::capabilities::Registry;
-use ursine_core::clock::{Clock, SystemClock};
-use ursine_core::dispatch::Daemon;
-use ursine_core::jobs::JobRegistry;
-use ursine_core::ratelimit::RateLimiter;
-use ursine_core::session::TokenStore;
+use ursine_core::auth::{AuthError, PeerInfo};
+use ursine_core::{AuditLog, Authenticator, Clock, Daemon, JobRegistry, SystemClock};
 
 /// No authentication path exists in the CLI: the root gate replaced it.
 /// Any (hypothetical) `auth` request is rejected outright — the stub
@@ -52,20 +45,13 @@ pub fn build(config_path: &std::path::Path) -> Result<Daemon, String> {
     let jobs_dir = PathBuf::from(format!("/run/ursinectl/jobs/{}-{seq}", std::process::id()));
     let jobs =
         JobRegistry::new(jobs_dir, Arc::clone(&audit), clock.clone()).map_err(|e| e.to_string())?;
-    let ttl = Duration::from_secs(u64::from(config.token_ttl_min) * 60);
-    let rate = config.login_rate_limit_per_min;
     let auth: Arc<dyn Authenticator> = Arc::new(NoAuth);
-    Ok(Daemon {
-        caps: Registry::system(),
-        config_path: config_path.to_path_buf(),
-        sessions: TokenStore::new(ttl, clock.clone()),
-        ratelimit: RateLimiter::new(rate, clock),
-        auth_permits: Arc::new(tokio::sync::Semaphore::new(
-            ursine_core::dispatch::MAX_INFLIGHT_AUTH,
-        )),
+    Ok(Daemon::assemble(
+        config_path.to_path_buf(),
+        config,
+        auth,
         audit,
         jobs,
-        auth,
-        config: tokio::sync::RwLock::new(config),
-    })
+        clock,
+    ))
 }

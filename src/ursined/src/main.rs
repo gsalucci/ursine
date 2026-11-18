@@ -8,17 +8,8 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
-use ursine_core::audit::AuditLog;
-use ursine_core::auth::Authenticator;
-use ursine_core::capabilities::Registry;
-use ursine_core::clock::{Clock, SystemClock};
-use ursine_core::dispatch::Daemon;
-use ursine_core::jobs::JobRegistry;
-use ursine_core::ratelimit::RateLimiter;
-use ursine_core::session::TokenStore;
-use ursine_core::socket;
+use ursine_core::{socket, AuditLog, Authenticator, Clock, Daemon, JobRegistry, SystemClock};
 
 const USAGE: &str = "\
 ursined — Ursine control daemon
@@ -114,22 +105,14 @@ async fn async_main(config_path: PathBuf) -> std::process::ExitCode {
 
     let auth: Arc<dyn Authenticator> = build_authenticator();
 
-    let daemon = Arc::new(Daemon {
-        caps: Registry::system(),
-        config_path: config_path.clone(),
-        sessions: TokenStore::new(
-            Duration::from_secs(u64::from(config.token_ttl_min) * 60),
-            clock.clone(),
-        ),
-        ratelimit: RateLimiter::new(config.login_rate_limit_per_min, clock.clone()),
-        auth_permits: Arc::new(tokio::sync::Semaphore::new(
-            ursine_core::dispatch::MAX_INFLIGHT_AUTH,
-        )),
+    let daemon = Arc::new(Daemon::assemble(
+        config_path.clone(),
+        config,
+        auth,
         audit,
         jobs,
-        auth,
-        config: tokio::sync::RwLock::new(config),
-    });
+        clock,
+    ));
 
     tracing::info!(
         socket = %socket_path.display(),

@@ -1,15 +1,11 @@
 //! `AppArmor` screen (SPEC-apparmor): status, profile modes, the source
 //! editor (syntax-checked save) and the notifications button.
 
-use cosmic::iced::Length;
-use cosmic::widget::selectable_text;
+use crate::prelude::*;
 use cosmic::widget::text::monotext;
 use cosmic::widget::text_editor::{self, text_editor};
-use cosmic::widget::{button, column, container, row, scrollable, text, text_input};
-use cosmic::Element;
 use ursine_api::{ApparmorCheck, ApparmorProfileFile, ApparmorView};
 
-use crate::app::Message;
 use crate::package_ui::{text_row, ConfirmVm};
 
 /// A confirmed mutation (drives the confirm blocks and the daemon call).
@@ -122,23 +118,16 @@ impl ApparmorState {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let mut items: Vec<Element<'_, Message>> = vec![row(vec![
-            text::title2("AppArmor").into(),
-            text("").width(Length::Fill).into(),
-            button::text("Refresh")
-                .on_press_maybe((!self.busy && !self.action_busy).then_some(Message::OpenApparmor))
-                .into(),
-        ])
-        .spacing(12)
-        .width(Length::Fill)
-        .into()];
-
-        if let Some(error) = &self.error {
-            items.push(selectable_text(error.clone()).into());
-        }
-        if let Some(message) = &self.message {
-            items.push(text(message.clone()).into());
-        }
+        let mut items = vec![ui::header(
+            "AppArmor",
+            (!self.busy && !self.action_busy).then_some(Message::OpenApparmor),
+        )];
+        items.extend(ui::status(
+            self.error.as_ref(),
+            self.message.as_deref(),
+            None,
+            None,
+        ));
         if self.busy {
             items.push(text("Reading AppArmor state…").into());
             return scrollable(column(items).spacing(16).padding(24)).into();

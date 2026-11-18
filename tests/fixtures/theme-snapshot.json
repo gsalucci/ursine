@@ -1,0 +1,25 @@
+{
+  "source": "dms",
+  "name": "green",
+  "dark": true,
+  "colors": {
+    "background": "#10140f",
+    "foreground": "#e0e4db",
+    "primary": "#4caf50",
+    "secondary": "#2e7d32",
+    "surface": "#1b1f19",
+    "error": "#f2b8b5",
+    "success": "#4daf4c",
+    "warning": "#dacb52",
+    "outline": "#35a639"
+  },
+  "fonts": {
+    "ui": "Inter Variable",
+    "mono": "Fira Code",
+    "weight": 400,
+    "scale": 1.0
+  },
+  "corner_radius": 12,
+  "icon_theme": null,
+  "cursor": null
+}

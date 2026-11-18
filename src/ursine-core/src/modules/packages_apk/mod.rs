@@ -96,34 +96,10 @@ pub async fn handle(action: &Action, ctx: &ModuleCtx<'_>) -> Result<serde_json::
             start_job(ctx, "remove_apk", &["del", package], true)
         }
         Action::ApkRemoveRegex { pattern, dry_run } => {
-            let names = matched_names(pattern).await?;
-            if *dry_run {
-                return Ok(json!({"dry_run": true, "would_change": names}));
-            }
-            if names.is_empty() {
-                return Ok(json!(ursine_api::CommandOutcome {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                }));
-            }
-            let mut args: Vec<&str> = vec!["del"];
-            args.extend(names.iter().map(String::as_str));
-            start_job(ctx, "remove_regex", &args, true)
+            start_regex_job(ctx, pattern, *dry_run, "del", "remove_regex", true).await
         }
         Action::ApkUpgradeRegex { pattern, dry_run } => {
-            let names = matched_names(pattern).await?;
-            if *dry_run {
-                return Ok(json!({"dry_run": true, "would_change": names}));
-            }
-            if names.is_empty() {
-                return Ok(json!(ursine_api::CommandOutcome {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                }));
-            }
-            let mut args: Vec<&str> = vec!["upgrade"];
-            args.extend(names.iter().map(String::as_str));
-            start_job(ctx, "upgrade_regex", &args, false)
+            start_regex_job(ctx, pattern, *dry_run, "upgrade", "upgrade_regex", false).await
         }
         Action::UpgradeApk => start_job(ctx, "upgrade_apk", &["upgrade"], false),
         Action::ListApkUpdates => {
@@ -270,10 +246,7 @@ fn upsert_repository(content: &str, url: &str, tag: Option<&str>) -> String {
     let mut out: Vec<String> = Vec::new();
     let mut replaced = false;
     for line in content.lines() {
-        let trimmed = line.trim();
-        let matched =
-            !trimmed.is_empty() && !trimmed.starts_with('#') && split_repo_line(trimmed).1 == url;
-        if matched {
+        if repo_line_matches(line, url) {
             // Replace the first match, collapse later duplicates.
             if !replaced {
                 out.push(render_repo_line(url, tag));
@@ -286,7 +259,18 @@ fn upsert_repository(content: &str, url: &str, tag: Option<&str>) -> String {
     if !replaced {
         out.push(render_repo_line(url, tag));
     }
-    let mut text = out.join("\n");
+    finish_repository(&out)
+}
+
+/// True when `line` configures `url` (blank lines and comments never do).
+fn repo_line_matches(line: &str, url: &str) -> bool {
+    let trimmed = line.trim();
+    !trimmed.is_empty() && !trimmed.starts_with('#') && split_repo_line(trimmed).1 == url
+}
+
+/// Rebuild the file text; every repositories file ends with one newline.
+fn finish_repository(lines: &[String]) -> String {
+    let mut text = lines.join("\n");
     text.push('\n');
     text
 }
@@ -300,10 +284,7 @@ fn remove_repository(content: &str, url: &str) -> Result<String, ApiError> {
     let mut out: Vec<String> = Vec::new();
     let mut removed = false;
     for line in content.lines() {
-        let trimmed = line.trim();
-        let matched =
-            !trimmed.is_empty() && !trimmed.starts_with('#') && split_repo_line(trimmed).1 == url;
-        if matched {
+        if repo_line_matches(line, url) {
             removed = true;
         } else {
             out.push(line.to_string());
@@ -312,9 +293,7 @@ fn remove_repository(content: &str, url: &str) -> Result<String, ApiError> {
     if !removed {
         return Err(ApiError::invalid("repository is not configured"));
     }
-    let mut text = out.join("\n");
-    text.push('\n');
-    Ok(text)
+    Ok(finish_repository(&out))
 }
 
 async fn write_repositories(path: &str, content: &str, copies: usize) -> Result<(), ApiError> {
@@ -571,16 +550,7 @@ fn parse_updates(output: &str) -> Vec<ApkUpdate> {
 }
 
 async fn search(query: &str) -> Result<Vec<ApkPackage>, ApiError> {
-    let query = query.trim();
-    if query.is_empty()
-        || query.len() > 128
-        || query.starts_with('-')
-        || !query
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-'))
-    {
-        return Err(ApiError::invalid("invalid apk search query"));
-    }
+    let query = exec::validate_search_query(query, "apk")?;
     let output = run(&["search", "-v", query]).await?;
     let mut rows = Vec::new();
     for line in output.lines().filter(|line| !line.is_empty()) {
@@ -603,6 +573,25 @@ async fn search(query: &str) -> Result<Vec<ApkPackage>, ApiError> {
     Ok(rows)
 }
 
+/// Both regex actions pass the matched names to one job: a dry run answers
+/// with the names, an empty set answers with empty output.
+async fn start_regex_job(
+    ctx: &ModuleCtx<'_>,
+    pattern: &str,
+    dry_run: bool,
+    verb: &str,
+    action: &'static str,
+    destructive: bool,
+) -> Result<serde_json::Value, ApiError> {
+    let names = matched_names(pattern).await?;
+    if let Some(answer) = exec::regex_noop(dry_run, &names) {
+        return Ok(answer);
+    }
+    let mut args: Vec<&str> = vec![verb];
+    args.extend(names.iter().map(String::as_str));
+    start_job(ctx, action, &args, destructive)
+}
+
 /// Installed package names matching `pattern` (validate + compile once).
 async fn matched_names(pattern: &str) -> Result<Vec<String>, ApiError> {
     let packages = installed().await?;
@@ -612,8 +601,7 @@ async fn matched_names(pattern: &str) -> Result<Vec<String>, ApiError> {
 /// Validate + compile once, then keep the installed names the regex
 /// matches (pure — the test suite drives it directly).
 fn matching_names(pattern: &str, packages: Vec<ApkPackage>) -> Result<Vec<String>, ApiError> {
-    exec::validate_regex(pattern)?;
-    let re = regex::Regex::new(pattern).map_err(|_| ApiError::invalid("invalid regex pattern"))?;
+    let re = exec::compile_regex(pattern)?;
     Ok(packages
         .into_iter()
         .filter(|package| re.is_match(&package.name))

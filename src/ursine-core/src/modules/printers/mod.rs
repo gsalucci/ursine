@@ -49,12 +49,7 @@ pub async fn handle(action: &Action, ctx: &ModuleCtx<'_>) -> Result<serde_json::
             validate_text(location, "location")?;
             backup().await?;
             let mut args = vec!["-p", name, "-E", "-v", uri, "-m", "everywhere"];
-            if !description.trim().is_empty() {
-                args.extend(["-D", description.trim()]);
-            }
-            if !location.trim().is_empty() {
-                args.extend(["-L", location.trim()]);
-            }
+            extend_text_args(&mut args, description, location);
             let output = run_quoted(&LPADMIN, &args).await?;
             Ok(json!({"output": output}))
         }
@@ -90,12 +85,7 @@ pub async fn handle(action: &Action, ctx: &ModuleCtx<'_>) -> Result<serde_json::
             } else {
                 args.extend(["-P", ppd]);
             }
-            if !description.trim().is_empty() {
-                args.extend(["-D", description.trim()]);
-            }
-            if !location.trim().is_empty() {
-                args.extend(["-L", location.trim()]);
-            }
+            extend_text_args(&mut args, description, location);
             for option in options {
                 validate_option(option)?;
                 args.extend(["-o", option]);
@@ -239,6 +229,17 @@ fn parse_jobs(output: &str, printer: Option<&str>) -> Vec<PrintJob> {
         .collect()
 }
 
+/// Append the optional human-readable fields (`-D description`, `-L location`)
+/// only when the caller supplied them.
+fn extend_text_args<'a>(args: &mut Vec<&'a str>, description: &'a str, location: &'a str) {
+    if !description.trim().is_empty() {
+        args.extend(["-D", description.trim()]);
+    }
+    if !location.trim().is_empty() {
+        args.extend(["-L", location.trim()]);
+    }
+}
+
 fn validate_name(name: &str) -> Result<(), ApiError> {
     if name.is_empty()
         || name.len() > 128
@@ -314,11 +315,7 @@ fn validate_text(value: &str, label: &str) -> Result<(), ApiError> {
 }
 
 fn tool(candidates: &[&'static str], label: &str) -> Result<&'static str, ApiError> {
-    candidates
-        .iter()
-        .find(|path| Path::new(path).is_file())
-        .copied()
-        .ok_or_else(|| ApiError::unavailable(format!("{label} not found"), "apk add cups"))
+    crate::tooling::resolve(candidates, label, "apk add cups")
 }
 
 async fn run(candidates: &[&'static str], args: &[&str]) -> Result<String, ApiError> {

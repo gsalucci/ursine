@@ -4,12 +4,19 @@ Run these from the project root.
 
 ## Rust toolchain (project)
 
+No host toolchain: everything runs in the pinned image (`ci/Containerfile`,
+`rust-toolchain.toml`).
+
 ```bash
-rustup update                # stable toolchain
-cargo update                 # dependency lockfile (Cargo.lock)
-cargo install cargo-audit    # once; then:
-cargo audit                  # dependency vulnerability scan
+podman build -t ursine-ci:1 -f ci/Containerfile .     # toolchain + analyzers
+podman run --rm --network=host -v "$PWD:/work" -w /work \
+  -e CARGO_HOME=/work/artifacts/cargo-home ursine-ci:1 \
+  cargo update --workspace                            # dependency lockfile
 ```
+
+Dependency advisories are gated by `cargo deny check advisories` and
+`cargo audit` inside the image (`scripts/dev.sh static deps`); nothing runs
+on the host.
 
 ## OpenCode CLI
 

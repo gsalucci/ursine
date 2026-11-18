@@ -120,40 +120,12 @@ pub async fn handle(action: &Action, ctx: &ModuleCtx<'_>) -> Result<serde_json::
             pattern,
             dry_run,
             system,
-        } => {
-            let ids = matched_app_ids(pattern, *system, ctx.as_user).await?;
-            if *dry_run {
-                return Ok(json!({"dry_run": true, "would_change": ids}));
-            }
-            if ids.is_empty() {
-                return Ok(json!(ursine_api::CommandOutcome {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                }));
-            }
-            let mut args: Vec<&str> = vec!["uninstall", "-y", "--noninteractive", scope(*system)];
-            args.extend(ids.iter().map(String::as_str));
-            start_job(ctx, "remove_regex", *system, &args)
-        }
+        } => start_regex_job(ctx, pattern, *dry_run, *system, "uninstall", "remove_regex").await,
         Action::FlatpakUpgradeRegex {
             pattern,
             dry_run,
             system,
-        } => {
-            let ids = matched_app_ids(pattern, *system, ctx.as_user).await?;
-            if *dry_run {
-                return Ok(json!({"dry_run": true, "would_change": ids}));
-            }
-            if ids.is_empty() {
-                return Ok(json!(ursine_api::CommandOutcome {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                }));
-            }
-            let mut args: Vec<&str> = vec!["update", "-y", "--noninteractive", scope(*system)];
-            args.extend(ids.iter().map(String::as_str));
-            start_job(ctx, "update_regex", *system, &args)
-        }
+        } => start_regex_job(ctx, pattern, *dry_run, *system, "update", "update_regex").await,
         Action::UpdateFlatpak { system } => {
             let scope = scope(*system);
             let args = ["update", "-y", "--noninteractive", scope];
@@ -209,6 +181,25 @@ const fn scope(system: bool) -> &'static str {
     }
 }
 
+/// Both regex actions pass the matched refs to one job: a dry run answers
+/// with the refs, an empty set answers with empty output.
+async fn start_regex_job(
+    ctx: &ModuleCtx<'_>,
+    pattern: &str,
+    dry_run: bool,
+    system: bool,
+    verb: &str,
+    action: &'static str,
+) -> Result<serde_json::Value, ApiError> {
+    let ids = matched_app_ids(pattern, system, ctx.as_user).await?;
+    if let Some(answer) = exec::regex_noop(dry_run, &ids) {
+        return Ok(answer);
+    }
+    let mut args: Vec<&str> = vec![verb, "-y", "--noninteractive", scope(system)];
+    args.extend(ids.iter().map(String::as_str));
+    start_job(ctx, action, system, &args)
+}
+
 /// Installed Flatpak refs matching `pattern` (id or human name).
 async fn matched_app_ids(pattern: &str, system: bool, user: &str) -> Result<Vec<String>, ApiError> {
     let packages = list(system, user).await?;
@@ -218,8 +209,7 @@ async fn matched_app_ids(pattern: &str, system: bool, user: &str) -> Result<Vec<
 /// Validate + compile once, then keep the refs whose app id OR human
 /// name the regex matches (pure — the test suite drives it directly).
 fn matching_app_ids(pattern: &str, packages: Vec<FlatpakPackage>) -> Result<Vec<String>, ApiError> {
-    exec::validate_regex(pattern)?;
-    let re = regex::Regex::new(pattern).map_err(|_| ApiError::invalid("invalid regex pattern"))?;
+    let re = exec::compile_regex(pattern)?;
     Ok(packages
         .into_iter()
         .filter(|package| re.is_match(&package.app_id) || re.is_match(&package.name))
@@ -232,8 +222,8 @@ async fn list(system: bool, user: &str) -> Result<Vec<FlatpakPackage>, ApiError>
     // two queries; rows are tagged from the flag that produced them.
     // Both run together (same binary/scope) and fail closed together.
     let (apps, runtimes) = tokio::try_join!(
-        list_kind(system, user, "--app", FlatpakRefKind::App),
-        list_kind(system, user, "--runtime", FlatpakRefKind::Runtime),
+        list_kind(system, user, "--app", FlatpakRefKind::App, false),
+        list_kind(system, user, "--runtime", FlatpakRefKind::Runtime, false),
     )?;
     let mut rows = apps;
     rows.extend(runtimes);
@@ -244,37 +234,31 @@ async fn list(system: bool, user: &str) -> Result<Vec<FlatpakPackage>, ApiError>
 /// Column order matches [`parse_list`], so rows share `FlatpakPackage`.
 async fn updates(system: bool, user: &str) -> Result<Vec<FlatpakPackage>, ApiError> {
     let (apps, runtimes) = tokio::try_join!(
-        updates_kind(system, user, "--app", FlatpakRefKind::App),
-        updates_kind(system, user, "--runtime", FlatpakRefKind::Runtime),
+        list_kind(system, user, "--app", FlatpakRefKind::App, true),
+        list_kind(system, user, "--runtime", FlatpakRefKind::Runtime, true),
     )?;
     let mut rows = apps;
     rows.extend(runtimes);
     Ok(rows)
 }
 
-async fn updates_kind(
-    system: bool,
-    user: &str,
-    kind_flag: &str,
-    kind: FlatpakRefKind,
-) -> Result<Vec<FlatpakPackage>, ApiError> {
-    let scope = scope(system);
-    let columns = format!("--columns={LIST_COLUMNS}");
-    let args = ["remote-ls", scope, kind_flag, "--updates", columns.as_str()];
-    let output = run(system, user, &args).await?;
-    Ok(parse_list(&output, system, kind))
-}
-
+/// One ref list: installed refs, or the refs with a newer remote commit
+/// (`--updates`). Both share the column order used by [`parse_list`].
 async fn list_kind(
     system: bool,
     user: &str,
     kind_flag: &str,
     kind: FlatpakRefKind,
+    updates: bool,
 ) -> Result<Vec<FlatpakPackage>, ApiError> {
     let scope = scope(system);
     let columns = format!("--columns={LIST_COLUMNS}");
-    let args = ["list", columns.as_str(), kind_flag, scope];
-    let output = run(system, user, &args).await?;
+    let args: &[&str] = if updates {
+        &["remote-ls", scope, kind_flag, "--updates", columns.as_str()]
+    } else {
+        &["list", columns.as_str(), kind_flag, scope]
+    };
+    let output = run(system, user, args).await?;
     Ok(parse_list(&output, system, kind))
 }
 
@@ -310,16 +294,7 @@ async fn remotes(system: Option<bool>, user: &str) -> Result<Vec<FlatpakRemote>,
 }
 
 async fn search(query: &str, system: bool, user: &str) -> Result<Vec<FlatpakPackage>, ApiError> {
-    let query = query.trim();
-    if query.is_empty()
-        || query.len() > 128
-        || query.starts_with('-')
-        || !query
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-'))
-    {
-        return Err(ApiError::invalid("invalid flatpak search query"));
-    }
+    let query = exec::validate_search_query(query, "flatpak")?;
     let scope = scope(system);
     let args = [
         "search",
