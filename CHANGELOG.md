@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.39.2] — 2026-11-18
+
 ### Changed
 
 - **Release acceptance is the only host interaction** (user decision):
