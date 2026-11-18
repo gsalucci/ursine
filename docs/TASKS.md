@@ -1,7 +1,7 @@
 # Tasks — Ursine
 
 **Milestone**: v0.39.0 — perf + modals everywhere (2026-11-16)
-**Updated**: 2026-11-18
+**Updated**: 2026-11-18 (0.39.2 released)
 **Workflow rule (binding)**: backend first, frontend immediately, same feature. No next feature until daemon + frontend reach parity.
 **UI rule (binding)**: patterns from cosmic-settings (structure), Webmin (action coverage), Cockpit (gating/status/confirmations).
 
