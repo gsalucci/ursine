@@ -1,6 +1,6 @@
 {
   "goal": "Ursine — FeralOS complete control center (Webmin-style): root daemon + libcosmic GUI (v1), full module coverage (v2), OIDC+web (v3, memory-safe stack), Incus UI (v4), ZFS+Pirateus (v5), multi-distro (v6). Intent source of truth: docs/intent/ursine.md.",
-  "status": "v0.39.3 RELEASED (tag v0.39.3 at cf6bd97, CI 44320374782 green; pin 53eade8). Host upgraded to 0.39.3; nix registry rows now render (as_user fix).",
+  "status": "v0.40.0 RELEASED (tag at 99b3a2c, CI 44363193354 green, pin baff114; protocol v6). Host upgraded and verified: nix Repositories scope dropdown (System|User), configured entries only, builtin defaults hidden.",
   "active_goals": [
     "RELEASE 0.22.0 (2026-10-29): GTK3 chain + eog/galculator targets + minimize toggle + log viewer; gate green; tagged for nix release and VM smoke.",
     "v0.18.4 INIT HARDENING (2026-10-26): PID1/init detection, root-owned daemon/PAM copies, dinit unit idempotency/stale cleanup, install.sh dinit defaults/restart, CI regression coverage. Review-closed; tag pending in this release commit.",
@@ -15,8 +15,8 @@
     "Nix package chain 2026-10-21: `ursine` -> `ursined` -> `ursine-activate`; daemon owns tools/packaging. Profile discovery is generic via SUDO_HOME/SUDO_USER/default. Staged tests and Nix checks green; host service activation pending root."
   ],
   "next_actions": [
-    "Re-open the Ursine GUI and check nix → Repositories: `ursine` row (name, URL, Remove) plus the global entries; add/remove must work for the user registry.",
-    "HOST ACCEPTANCE is proven: scripts/test-host.sh upgraded the host twice (0.39.2, 0.39.3) from the published flake, activated OpenRC and passed version/auth/protocol checks.",
+    "User: open the GUI nix screen — Scope dropdown System/User, `ursine` row in User scope, Remove/Add working; add the missing FeralOS pin if wanted: System scope, `nixpkgs` = `github:NixOS/nixpkgs/nixos-26.05`.",
+    "FeralOS install finding: this host has the nixos-26.05 channel but no /etc/nix/registry.json, so flakes still resolve nixpkgs-unstable; the installer pin should be restored (Ursine System scope or the FeralOS installer).",
     "Dependency duplicates stay report-only (90 versions, all from the pinned libcosmic/iced graph)."
   ],
   "key_decisions": [
@@ -90,7 +90,8 @@
     "2026-11-18 HOST ACCEPTANCE (corrected): `scripts/test-host.sh` runs AFTER the tag, never reads or changes the repository, and installs the PUBLISHED GitHub flake: ensure registry entry `flake:ursine`, `nix flake metadata --refresh`, read the published version with `nix eval --refresh`, install/upgrade the profile element, require the installed `ursined` to match, `sudo ursine-activate`, then version/service/`ursinectl system status` checks. `scripts/build-gui-dev.sh` + `nix/dev-flake.nix` stay deleted. No push/tag/pull in the script.",
     "2026-11-18 RELEASE 0.39.2: bump + chore(release) + annotated tag v0.39.2 at 45fcd0f. First tag run failed in the nix job: the nix container opens the bind-mounted checkout with libgit2, which rejects a repo owned by the runner user (rootless podman hid it locally). Fix: `git config --global --add safe.directory /work` inside the container for lint/eval and the pin check; retagged at the fixed tip (the first attempt had already pushed the pin commit b5a03bc, so the retag was rebased onto it). Tag CI 44298587484 green: verify published tarball+checksum, nix attached flake source+checksum.",
     "2026-11-18 HOST ACCEPTANCE FIRST RUN: test-host.sh works (registry -> refresh -> profile install -> sudo ursine-activate -> checks). It exposed that the 0.39.2 GitHub release was left as a DRAFT: anonymous asset download 404s, so the flake pinned an unfetchable tarball. Release published manually; CI fixed — the nix smoke now downloads assets anonymously (a draft fails the job) and the publish step forces --draft=false.",
-    "2026-11-18 NIX REGISTRY as_user: the GUI legitimately sends as_user with list/add/remove nix repository; the dispatch allowlist was missing those actions, so the section rendered empty. They are user-scoped now; non-root may only target its own account for registry writes; root may retarget (ursinectl). Released as 0.39.3."
+    "2026-11-18 NIX REGISTRY as_user: the GUI legitimately sends as_user with list/add/remove nix repository; the dispatch allowlist was missing those actions, so the section rendered empty. They are user-scoped now; non-root may only target its own account for registry writes; root may retarget (ursinectl). Released as 0.39.3.",
+    "2026-11-18 NIX REPOSITORY SCOPES (user decision, FeralOS parity): nix Repositories has the Flatpak-style System|User dropdown; it lists only configured registry entries + channels per scope and never the builtin global defaults (they have no file and no restore path). Remove routes by source; system add merges into /etc/nix/registry.json; wire protocol v6. Released as 0.40.0; host verified."
   ],
   "risks": [
     "v0.18.3 shipped before the Tier 2 review gate; 0.18.4 closes the findings. Never release before review closure again.",

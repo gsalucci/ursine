@@ -6,6 +6,17 @@
 See `state/session-state.json` for current goals, decisions, risks, and next actions.
 See `AGENTS.md` for project context and milestone history.
 
+## Release 0.40.0 — nix repository scopes (FeralOS model), protocol v6 (2026-11-18)
+
+**Status**: tag `v0.40.0` at `99b3a2c`, CI `44363193354` green (`verify` published `draft=false`, `nix` pinned `baff114`). `scripts/test-host.sh` upgraded the host to 0.40.0 (`protocol_version: 6`). Feature commit `d2e7b2b`.
+
+- **Scope dropdown** `System | User` (same control as Flatpak) drives the nix Repositories section; the target-user field still picks the profile.
+- **List** shows configured entries only: the scope's flake registry plus its `nix-channel` channels (a channel fills a name the registry does not define). Builtin `global` defaults are never returned — no file to edit, no restore path — and the old `scope=global` removal code is gone.
+- **Rows** keep the apk shape (name, URL, Remove); `Remove` routes `source=registry` (user CLI or the system file) vs `source=channel` (`nix-channel --remove`). System adds merge an `indirect` entry into `/etc/nix/registry.json` (`github:owner/repo[/ref]`, backup + atomic write).
+- **Wire protocol v6**; `ursinectl`, guide, man page, SPEC-packages-nix, samples and tests updated (parser scopes, channel parsing, add/remove routing).
+- **Verified on the host** through the daemon (as `gab`): user scope = `ursine` only; add `probe` → present; remove → gone; `nix registry list | grep user` clean. System scope = root's channel `nixpkgs https://nixos.org/channels/nixos-26.05`.
+- **Install finding**: this FeralOS machine has the channel but **no `/etc/nix/registry.json`** (the installer's stable pin is missing), so `nixpkgs#…` still resolves through the builtin unstable mapping. The System scope Add form can write the pin (`nixpkgs` `github:NixOS/nixpkgs/nixos-26.05`).
+
 ## Release 0.39.3 — nix repositories in the GUI (2026-11-18)
 
 **Status**: tag `v0.39.3` at `cf6bd97`, tag CI `44320374782` green (`verify` published `draft=false`, `nix` pinned `53eade8` + attached the flake). Host upgraded by `scripts/test-host.sh` to 0.39.3 and the daemon now answers the registry with the user entry.

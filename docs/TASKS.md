@@ -206,7 +206,8 @@
 | Nix flake full build never run locally (eval only) | open | first CI run validates; CI flake job is the gate |
 | Shadow auth path not yet tested on a FeralOS target | open | fixture-based unit tests green in CI; log in with a real user on FeralOS before v1.0 |
 | Full init activation not tested | open | `systemd-analyze verify` green, `dinitcheck` green; OpenRC start blocked by container read-only cgroups. Run on a disposable VM/real target. |
-| `scripts/test-host.sh` never executed (host acceptance) | open | run it after the next tag: registry entry, published-flake refresh, profile upgrade/install, `sudo ursine-activate`, version/service/`ursinectl` checks |
+| FeralOS host has the nixos-26.05 channel but no `/etc/nix/registry.json` pin | open | flakes resolve nixpkgs-unstable; add the pin from the Ursine System scope or restore it in the FeralOS installer |
+| `scripts/test-host.sh` never executed (host acceptance) | resolved | run it after the next tag: registry entry, published-flake refresh, profile upgrade/install, `sudo ursine-activate`, version/service/`ursinectl` checks |
 | Duplicate crate versions in the dependency graph (90) | resolved (report) | all from the pinned libcosmic/iced graph; `cargo tree -d` stays a report in the run dir, never a committed baseline |
 | Tag release publish/auto-pin/verify-pin | resolved | `v0.3.0` run `39452993223` green; release assets + flake archive published; `nix/binary.nix` pinned in `bdbf6ce`; `verify-pin` green |
 | `.opencode/package.json` + lock tracked while `.opencode/.gitignore` exists | resolved | ignore lines dropped; files tracked intentionally |
