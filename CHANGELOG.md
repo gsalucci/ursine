@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.40.0] — 2026-11-18
+
 ### Changed
 
 - **Nix repositories follow the FeralOS model** (user decision): the section
