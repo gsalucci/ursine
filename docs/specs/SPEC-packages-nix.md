@@ -24,9 +24,9 @@ channels / `nix-env` are out of scope by decision (skea999).
 | `nix.upgrade` | asUser | `nix profile upgrade <element>` / `--all` |
 | `nix.upgradeRegex` | asUser | `nix profile upgrade --regex <pattern>` |
 | `nix.search` | asUser | `nix search <repo> <query> --json` → `SearchResult[]` (repo defaults to `nixpkgs`; custom repos prefix bare installables) |
-| `nix.listRepositories` | asUser | `nix registry list` → `NixRepository[]` (name/url/scope; rows WITHOUT a scope column — older nix — parse as `default`; every row — `user`, `default`, `global` — is shown and removable, apk/flatpak parity) |
-| `nix.addRepository` | asUser | `nix registry add <name> <flake-ref>` |
-| `nix.removeRepository` | asUser | `nix registry remove <name>` (destructive in the CLI) |
+| `nix.listRepositories` | asUser | `nix registry list` + `nix-channel --list` → `NixRepository[]` for the selected scope (`system` or the target user). Only configured entries: builtin `global` defaults are never returned (no file to edit, no way to restore them). A channel fills a name the registry does not define. |
+| `nix.addRepository` | asUser | user scope: `nix registry add <name> <flake-ref>`; system scope: merge an `indirect` entry into `/etc/nix/registry.json` (`github:owner/repo[/ref]` only), backup + atomic write |
+| `nix.removeRepository` | asUser | destructive: `source=registry` → `nix registry remove` (user) or the system-file edit; `source=channel` → `nix-channel --remove` |
 | `nix.listNixUpdates` | asUser | `nix profile list --json` + one `nix flake metadata <originalUrl> --json` per unique reference (300 s budget each; an element is outdated when its pinned `narHash`/`rev` differs from the metadata's current lock — verified on nix 2.31.5, which has NO `profile upgrade --dry-run`) → `NixUpdates {count, packages}`; read-only, on demand |
 | `nix.generations` | asUser | `nix profile history` → lines (returned NEWEST first) |
 | `nix.rollback` | asUser | `nix profile rollback [--to N]` |
@@ -48,8 +48,8 @@ generation is never deleted; `pruneGenerations` computes the plan first, so the
 GUI can preview it before running. Verified against nix 2.31.5: `history` emits
 ANSI escapes and has no `(current)` marker; `--delete-generations +N` needs root.
 
-- Registry entries live in the acting user's nix flake registry (`~/.config/nix/registry.json` via `nix registry …`); `global` entries are removed by rewriting the system registry file (`/etc/nix/registry.json`) as root. No ursine-side state file.
-- Registry list/add/remove are user-scoped actions: `asUser` picks the registry to read or edit. A NON-root caller may target only its own account for add/remove (the file lands in that user's home); root may retarget an existing normal-login account.
+- Repositories mirror the FeralOS model: the installer adds the `nixos-26.05` channel as root and pins `nixpkgs` in `/etc/nix/registry.json` plus the install user's registry. Ursine lists exactly those configured entries per scope — `System` = system registry + root channels, `User` = the target user's — and never the builtin registry defaults (a user cannot restore one, so it is not offered for removal).
+- Registry list/add/remove are user-scoped actions: `asUser` picks the registry to read or edit. A NON-root caller may target only its own account; root may retarget an existing normal-login account. Every authenticated Ursine user is in `wheel` (login gate), which is the distro's trusted-users boundary.
   Both mutations rotate the registry JSON first (uniform `.ursine-backup[.N]` slots, `backup_configs.copies`; chowned back to the user).
 - `asUser` defaults to the authenticated principal; daemon verifies target user exists and is a normal user (uid >= 1000) before exec
 - Long ops (install/upgrade) run as daemon jobs: exact output streams to `/run/ursine/jobs/<id>.log` and frontends poll `job_output` (supersedes the earlier same-connection JSON progress-event design; see Package progress)

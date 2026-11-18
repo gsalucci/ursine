@@ -102,8 +102,9 @@ audit log). Run `ursinectl --help` for the grouped list.
 ### packages_nix (`nix`)
 
 `list_installed`, `search query=… [repo=…]`, `install package=…`,
-`list_nix_repositories`, `add_nix_repository name=… url=…`,
-`remove_nix_repository name=… [scope=user|default|global]`,
+`list_nix_repositories [system=true]`,
+`add_nix_repository name=… url=… [system=true]`,
+`remove_nix_repository name=… [system=true] [source=registry|channel]`,
 `remove package=…`, `remove_all`, `remove_regex pattern=… [dry_run=true]`,
 `upgrade [package=… | all=true]`, `upgrade_regex pattern=… [dry_run=true]`,
 `generations`, `rollback [generation=…]`,
@@ -113,14 +114,18 @@ flake reference; prints the count + names; network),
 `wipe_history [older_than=…] dry_run=…`, `diff_closures [generation=…]`,
 `store_gc`, `prune_generations keep=… dry_run=…`
 
-`list_nix_repositories` shows the flake registry (user and global
-entries). `search repo=…` runs against any registry flake and returns
-bare installables prefixed with that flake, so Install resolves
+`list_nix_repositories` shows the configured repositories of one scope:
+`system=true` is the system registry (`/etc/nix/registry.json`) plus root's
+channels, the default is the target user's registry and channels. Builtin
+registry defaults are never listed — they have no file to edit. A channel
+fills a name the registry does not define, so a FeralOS install shows its
+pinned `nixpkgs` once. `search repo=…` runs against any registry flake and
+returns bare installables prefixed with that flake, so Install resolves
 against the searched repository; `repo` defaults to `nixpkgs`.
-`remove_nix_repository` is destructive (`--yes`): the default scope
-(`user`, also `default`) runs `nix registry remove` in the target
-user's registry; `scope=global` edits the system registry
-(`/etc/nix/registry.json`) directly. An unknown scope is rejected.
+`remove_nix_repository` is destructive (`--yes`): `source=registry` (default)
+runs `nix registry remove` for the user, or edits the system registry file
+for `system=true`; `source=channel` runs `nix-channel --remove`. A user-scope
+call may only target the caller's own account.
 
 ### packages_apk (`apk`)
 

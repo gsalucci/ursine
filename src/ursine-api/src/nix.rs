@@ -63,15 +63,31 @@ pub struct SearchResult {
     pub description: Option<String>,
 }
 
-/// One flake registry entry from `nix registry list`.
+/// Where a configured repository entry lives.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NixRepoSource {
+    /// A flake registry entry (`nix registry add/remove`, or the system
+    /// registry file for the `System` scope).
+    #[default]
+    Registry,
+    /// A legacy `nix-channel` channel (`nix-channel --add/--remove`).
+    Channel,
+}
+
+/// One configured repository for the selected scope.
+///
+/// Registry entries plus channels (a channel fills a name the registry does
+/// not define). Builtin registry defaults are never listed — they have no
+/// file to edit and no user who could restore them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NixRepository {
-    /// Registry name without the `flake:` prefix (e.g. `nixpkgs`).
+    /// Name without the `flake:` prefix (e.g. `nixpkgs`).
     pub name: String,
-    /// Flake reference (e.g. `github:NixOS/nixpkgs`).
+    /// Flake reference or channel URL (e.g. `github:NixOS/nixpkgs`).
     pub url: String,
-    /// `user` or `global` (only `user` entries are editable here).
-    pub scope: String,
+    /// Which store holds the entry; drives the remove call.
+    pub source: NixRepoSource,
 }
 
 /// Outcome of a mutating profile command (install/remove/upgrade/...).

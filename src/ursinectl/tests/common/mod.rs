@@ -131,14 +131,22 @@ pub const SAMPLES: &[Sample] = &[
     Sample {
         module: ursine_api::ModuleId::PackagesNix,
         action: "add_nix_repository",
-        pairs: &[("name", "myflake"), ("url", "github:owner/repo")],
+        pairs: &[
+            ("name", "myflake"),
+            ("url", "github:owner/repo"),
+            ("system", "true"),
+        ],
         destructive: false,
         dispatch: Dispatch::Gate,
     },
     Sample {
         module: ursine_api::ModuleId::PackagesNix,
         action: "remove_nix_repository",
-        pairs: &[("name", "myflake"), ("scope", "global")],
+        pairs: &[
+            ("name", "myflake"),
+            ("system", "true"),
+            ("source", "channel"),
+        ],
         destructive: true,
         dispatch: Dispatch::Gate,
     },

@@ -131,7 +131,7 @@ fn status_prints_version_json() {
     let v = json_ok(&["--json", "system", "status"]);
     assert!(v.get("version").is_some(), "{v}");
     // Wire contract every frontend depends on.
-    assert_eq!(v["protocol_version"], 5, "{v}");
+    assert_eq!(v["protocol_version"], ursine_api::PROTOCOL_VERSION, "{v}");
 }
 
 #[test]

@@ -40,38 +40,222 @@ async fn backup_registry(user: &str, copies: usize) -> Result<(), ApiError> {
 
 const GLOBAL_REGISTRY: &str = "/etc/nix/registry.json";
 
-/// Drop one entry from the SYSTEM registry. `nix registry remove`
-/// only edits the calling user's file, so the daemon edits the system
-/// file the Webmin way: read, rotate the backup, atomic replace.
-async fn remove_global_repository(name: &str, copies: usize) -> Result<(), ApiError> {
-    // Cap BEFORE reading: the limit guards allocation, not just parse.
-    let meta = std::fs::metadata(GLOBAL_REGISTRY)
-        .map_err(|e| ApiError::internal(format!("stat {GLOBAL_REGISTRY}: {e}")))?;
+/// One `nix registry list` row with its scope kept for filtering.
+#[derive(Debug)]
+struct RegistryRow {
+    scope: String,
+    name: String,
+    url: String,
+}
+
+/// `nix registry list` → rows.
+///
+/// Shapes seen in the wild:
+///   user   flake:nixpkgs github:…
+///   system flake:nixpkgs github:…          (/etc/nix/registry.json)
+///   global flake:nixpkgs …                 (builtin: dropped, not listed)
+///   *user  flake:nixpkgs …                 (active marker)
+/// A line without a scope column (older nix) parses as `user`.
+fn parse_registry_list(output: &str) -> Vec<RegistryRow> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace().collect::<Vec<_>>().into_iter();
+            let first = fields.next()?.trim_start_matches('*');
+            let (scope, first) = if matches!(first, "user" | "system" | "global") {
+                (first.to_string(), fields.next()?)
+            } else {
+                ("user".to_string(), first)
+            };
+            let name = first.strip_prefix("flake:")?;
+            let url = fields.collect::<Vec<_>>().join(" ");
+            if url.is_empty() || name.is_empty() {
+                return None;
+            }
+            Some(RegistryRow {
+                scope,
+                name: name.to_string(),
+                url,
+            })
+        })
+        .collect()
+}
+
+/// `nix-channel --list` → `name url` rows (one pair per line).
+fn parse_channel_list(output: &str) -> Vec<(String, String)> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let name = fields.next()?;
+            let url = fields.next()?;
+            Some((name.to_string(), url.to_string()))
+        })
+        .collect()
+}
+
+/// Configured repositories for one scope. Builtin `global` defaults are
+/// never returned: there is no file to edit and no way for a user to
+/// restore one by accident. A channel fills a name the registry does not
+/// define, so a `FeralOS` install shows its pinned `nixpkgs` once.
+async fn list_repositories(user: &str, system: bool) -> Result<Vec<NixRepository>, ApiError> {
+    let wanted = if system { "system" } else { "user" };
+    let mut rows: Vec<NixRepository> = registry_rows(user)
+        .await?
+        .into_iter()
+        .filter(|row| row.scope == wanted)
+        .map(|row| NixRepository {
+            name: row.name,
+            url: row.url,
+            source: ursine_api::NixRepoSource::Registry,
+        })
+        .collect();
+    for (name, url) in channel_rows(user, system).await? {
+        if !rows.iter().any(|row| row.name == name) {
+            rows.push(NixRepository {
+                name,
+                url,
+                source: ursine_api::NixRepoSource::Channel,
+            });
+        }
+    }
+    Ok(rows)
+}
+
+async fn registry_rows(user: &str) -> Result<Vec<RegistryRow>, ApiError> {
+    let program = exec::nix_path()?;
+    let out = exec::run_as_user_argv(user, program, &["registry", "list"], MUTATE_TIMEOUT).await?;
+    Ok(parse_registry_list(&out.stdout))
+}
+
+/// Channels belong to one user: root's channel is the system one (the
+/// `FeralOS` installer adds it there).
+async fn channel_rows(user: &str, system: bool) -> Result<Vec<(String, String)>, ApiError> {
+    let program = exec::nix_channel_path()?;
+    let out = if system {
+        exec::run_root_program(program, &["--list"], MUTATE_TIMEOUT).await?
+    } else {
+        exec::run_as_user_argv(user, program, &["--list"], MUTATE_TIMEOUT).await?
+    };
+    Ok(parse_channel_list(&out.stdout))
+}
+
+/// Read the system registry, or the empty document when it does not exist
+/// yet (fresh install; the `FeralOS` installer creates it with the pin).
+fn read_system_registry() -> Result<serde_json::Value, ApiError> {
+    let path = std::path::Path::new(GLOBAL_REGISTRY);
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return Ok(json!({"version": 2, "flakes": []}));
+    };
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return Err(ApiError::internal("system registry is not a regular file"));
+    }
     if meta.len() > 1024 * 1024 {
         return Err(ApiError::internal(
             "system registry file is larger than 1 MiB",
         ));
     }
-    let content = std::fs::read_to_string(GLOBAL_REGISTRY)
+    let content = std::fs::read_to_string(path)
         .map_err(|e| ApiError::internal(format!("read {GLOBAL_REGISTRY}: {e}")))?;
-    let mut value: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| ApiError::internal(format!("parse {GLOBAL_REGISTRY}: {e}")))?;
-    if !drop_global_flake(&mut value, name)? {
+    serde_json::from_str(&content)
+        .map_err(|e| ApiError::internal(format!("parse {GLOBAL_REGISTRY}: {e}")))
+}
+
+async fn write_system_registry(value: &serde_json::Value, copies: usize) -> Result<(), ApiError> {
+    let mut updated = serde_json::to_string_pretty(value)
+        .map_err(|e| ApiError::internal(format!("encode {GLOBAL_REGISTRY}: {e}")))?;
+    updated.push('\n');
+    exec::run_as_user_atomic_write("root", GLOBAL_REGISTRY, &updated, copies)
+        .await
+        .map(|_| ())
+}
+
+/// `from.id` of an `indirect` registry entry.
+fn indirect_id(entry: &serde_json::Value) -> Option<&str> {
+    let from = entry.get("from")?;
+    if from
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("indirect")
+        != "indirect"
+    {
+        return None;
+    }
+    from.get("id").and_then(serde_json::Value::as_str)
+}
+
+/// Add or replace one `type = indirect` entry in the system registry.
+async fn upsert_system_repository(name: &str, url: &str, copies: usize) -> Result<(), ApiError> {
+    let target = github_flake_target(url)?;
+    let mut value = read_system_registry()?;
+    let Some(flakes) = value
+        .get_mut("flakes")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return Err(ApiError::internal(
+            "system registry: flakes is not an array",
+        ));
+    };
+    let mut replaced = false;
+    for entry in flakes.iter_mut() {
+        if indirect_id(entry) == Some(name) {
+            entry["to"] = target.clone();
+            replaced = true;
+            break;
+        }
+    }
+    if !replaced {
+        flakes.push(json!({
+            "from": {"type": "indirect", "id": name},
+            "to": target,
+        }));
+    }
+    write_system_registry(&value, copies).await
+}
+
+/// System registry entries are written by us, so the accepted URL shape is
+/// minimal and exact: `github:owner/repo[/ref]`.
+fn github_flake_target(url: &str) -> Result<serde_json::Value, ApiError> {
+    let Some(rest) = url.strip_prefix("github:") else {
+        return Err(ApiError::invalid(
+            "system repositories require a github:owner/repo[/ref] reference",
+        ));
+    };
+    let mut parts = rest.splitn(3, '/');
+    let owner = parts.next().unwrap_or_default();
+    let repo = parts.next().unwrap_or_default();
+    let git_ref = parts.next().filter(|value| !value.is_empty());
+    if owner.is_empty() || repo.is_empty() {
+        return Err(ApiError::invalid(
+            "system repository reference must be github:owner/repo[/ref]",
+        ));
+    }
+    let mut target = json!({"type": "github", "owner": owner, "repo": repo});
+    if let Some(git_ref) = git_ref {
+        if let Some(map) = target.as_object_mut() {
+            map.insert("ref".to_string(), json!(git_ref));
+        }
+    }
+    Ok(target)
+}
+
+/// Drop one entry from the SYSTEM registry: `nix registry remove` only
+/// edits the calling user's file, so the daemon edits the system file the
+/// Webmin way (backup rotation + atomic replace).
+async fn remove_system_repository(name: &str, copies: usize) -> Result<(), ApiError> {
+    let mut value = read_system_registry()?;
+    if !drop_registry_flake(&mut value, name)? {
         // Nothing there — removing is idempotent.
         return Ok(());
     }
-    let mut updated = serde_json::to_string_pretty(&value)
-        .map_err(|e| ApiError::internal(format!("encode {GLOBAL_REGISTRY}: {e}")))?;
-    updated.push('\n');
-    exec::run_as_user_atomic_write("root", GLOBAL_REGISTRY, &updated, copies).await?;
-    Ok(())
+    write_system_registry(&value, copies).await
 }
 
 /// Remove one `type = indirect` flake from a parsed registry document
 /// (a same-id entry of another type is never touched). Returns whether
 /// anything was dropped. A present-but-wrong-typed `flakes` key is a
 /// diagnosed error — never a silent success.
-fn drop_global_flake(value: &mut serde_json::Value, name: &str) -> Result<bool, ApiError> {
+fn drop_registry_flake(value: &mut serde_json::Value, name: &str) -> Result<bool, ApiError> {
     let Some(raw) = value.get_mut("flakes") else {
         return Ok(false);
     };
@@ -79,19 +263,7 @@ fn drop_global_flake(value: &mut serde_json::Value, name: &str) -> Result<bool, 
         return Err(ApiError::internal("registry file: flakes is not an array"));
     };
     let before = flakes.len();
-    flakes.retain(|entry| {
-        let from = entry.get("from");
-        let is_target = from
-            .and_then(|from| from.get("id"))
-            .and_then(serde_json::Value::as_str)
-            == Some(name)
-            && from
-                .and_then(|from| from.get("type"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("indirect")
-                == "indirect";
-        !is_target
-    });
+    flakes.retain(|entry| indirect_id(entry) != Some(name));
     Ok(flakes.len() != before)
 }
 
@@ -109,45 +281,6 @@ fn prefix_installables(results: &mut [SearchResult], flake: &str) {
             }
         }
     }
-}
-
-/// `nix registry list` → rows (`user   flake:NAME ref` / `global …`).
-async fn list_repositories(user: &str) -> Result<Vec<NixRepository>, ApiError> {
-    let program = exec::nix_path()?;
-    let out = exec::run_as_user_argv(user, program, &["registry", "list"], MUTATE_TIMEOUT).await?;
-    Ok(parse_registry_list(&out.stdout))
-}
-
-fn parse_registry_list(output: &str) -> Vec<NixRepository> {
-    output
-        .lines()
-        .filter_map(|line| {
-            // Shapes seen in the wild:
-            //   user   flake:nixpkgs github:…
-            //   global flake:nixpkgs github:…
-            //   flake:nixpkgs github:…            (no scope column)
-            //   *user  flake:nixpkgs …            (active marker)
-            let mut fields = line.split_whitespace().collect::<Vec<_>>().into_iter();
-            let first = fields.next()?.trim_start_matches('*');
-            let (scope, first) = if first == "user" || first == "global" {
-                (first.to_string(), fields.next()?)
-            } else {
-                // Older/other nix builds omit the scope column: those
-                // rows are still visible (and removable) as "default".
-                ("default".to_string(), first)
-            };
-            let name = first.strip_prefix("flake:")?;
-            let url = fields.collect::<Vec<_>>().join(" ");
-            if url.is_empty() || name.is_empty() {
-                return None;
-            }
-            Some(NixRepository {
-                name: name.to_string(),
-                url,
-                scope,
-            })
-        })
-        .collect()
 }
 
 /// Registry names: flake-ref name charset, no leading `-`.
@@ -668,47 +801,68 @@ pub async fn handle(action: &Action, ctx: &ModuleCtx<'_>) -> Result<serde_json::
                 "truncated": page.truncated,
             }))
         }
-        Action::ListNixRepositories => {
-            Ok(json!({"repositories": list_repositories(ctx.as_user).await?}))
+        Action::ListNixRepositories { system } => {
+            Ok(json!({"repositories": list_repositories(ctx.as_user, *system).await?}))
         }
-        Action::AddNixRepository { name, url } => {
+        Action::AddNixRepository { name, url, system } => {
             validate_repo_name(name)?;
             validate_repo_url(url)?;
-            backup_registry(ctx.as_user, crate::backup_configs::copies_from(&ctx.config)).await?;
-            let program = exec::nix_path()?;
-            exec::run_as_user_argv(
-                ctx.as_user,
-                program,
-                &["registry", "add", name, url],
-                MUTATE_TIMEOUT,
-            )
-            .await?;
-            Ok(json!({"repositories": list_repositories(ctx.as_user).await?}))
-        }
-        Action::RemoveNixRepository { name, scope } => {
-            validate_repo_name(name)?;
-            let scope = scope.as_deref().unwrap_or("user");
-            if !matches!(scope, "user" | "default" | "global") {
-                return Err(ApiError::invalid("invalid repository scope"));
-            }
             let copies = crate::backup_configs::copies_from(&ctx.config);
-            if scope == "global" {
-                // `nix registry remove` only edits the calling user's
-                // file: the system registry is edited directly
-                // (Webmin pattern), with the uniform backup rotation.
-                remove_global_repository(name, copies).await?;
+            if *system {
+                upsert_system_repository(name, url, copies).await?;
             } else {
                 backup_registry(ctx.as_user, copies).await?;
                 let program = exec::nix_path()?;
                 exec::run_as_user_argv(
                     ctx.as_user,
                     program,
-                    &["registry", "remove", name],
+                    &["registry", "add", name, url],
                     MUTATE_TIMEOUT,
                 )
                 .await?;
             }
-            Ok(json!({"repositories": list_repositories(ctx.as_user).await?}))
+            Ok(json!({"repositories": list_repositories(ctx.as_user, *system).await?}))
+        }
+        Action::RemoveNixRepository {
+            name,
+            system,
+            source,
+        } => {
+            validate_repo_name(name)?;
+            let copies = crate::backup_configs::copies_from(&ctx.config);
+            match source {
+                ursine_api::NixRepoSource::Channel => {
+                    let program = exec::nix_channel_path()?;
+                    if *system {
+                        exec::run_root_program(program, &["--remove", name], MUTATE_TIMEOUT)
+                            .await?;
+                    } else {
+                        exec::run_as_user_argv(
+                            ctx.as_user,
+                            program,
+                            &["--remove", name],
+                            MUTATE_TIMEOUT,
+                        )
+                        .await?;
+                    }
+                }
+                ursine_api::NixRepoSource::Registry => {
+                    if *system {
+                        remove_system_repository(name, copies).await?;
+                    } else {
+                        backup_registry(ctx.as_user, copies).await?;
+                        let program = exec::nix_path()?;
+                        exec::run_as_user_argv(
+                            ctx.as_user,
+                            program,
+                            &["registry", "remove", name],
+                            MUTATE_TIMEOUT,
+                        )
+                        .await?;
+                    }
+                }
+            }
+            Ok(json!({"repositories": list_repositories(ctx.as_user, *system).await?}))
         }
         Action::Install { package } => {
             let installable = normalize_installable(package)?;
@@ -1181,7 +1335,7 @@ mod tests {
                   "to": {"type": "path", "path": "/y"}}
             ]
         });
-        assert!(drop_global_flake(&mut value, "nixpkgs").unwrap());
+        assert!(drop_registry_flake(&mut value, "nixpkgs").unwrap());
         let flakes = value
             .get("flakes")
             .and_then(serde_json::Value::as_array)
@@ -1196,12 +1350,12 @@ mod tests {
             .collect();
         // The indirect target went; the same id under another type stayed.
         assert_eq!(ids, ["ursine", "nixpkgs"]);
-        assert!(!drop_global_flake(&mut value, "nixpkgs").unwrap());
+        assert!(!drop_registry_flake(&mut value, "nixpkgs").unwrap());
         let mut no_key = json!({"version": 2});
-        assert!(!drop_global_flake(&mut no_key, "nixpkgs").unwrap());
+        assert!(!drop_registry_flake(&mut no_key, "nixpkgs").unwrap());
         // Wrong-typed flakes is diagnosed, not swallowed.
         let mut wrong = json!({"flakes": "not an array"});
-        assert!(drop_global_flake(&mut wrong, "nixpkgs").is_err());
+        assert!(drop_registry_flake(&mut wrong, "nixpkgs").is_err());
     }
 
     #[test]
@@ -1259,10 +1413,22 @@ global flake:blender-bin github:edolstra/nix-warez?dir=blender\n";
 *user flake:agenix github:ryantm/agenix\n";
         let rows = parse_registry_list(out);
         assert_eq!(rows.len(), 2, "{rows:?}");
-        assert_eq!(rows[0].scope, "default");
+        assert_eq!(rows[0].scope, "user");
         assert_eq!(rows[0].name, "nixpkgs");
         assert_eq!(rows[1].scope, "user");
         assert_eq!(rows[1].name, "agenix");
+    }
+
+    #[test]
+    fn parses_channel_list() {
+        // `nix-channel --list`: one `name url` pair per line.
+        let out = "nixpkgs https://nixos.org/channels/nixos-26.05\n";
+        let rows = parse_channel_list(out);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].0, "nixpkgs");
+        assert_eq!(rows[0].1, "https://nixos.org/channels/nixos-26.05");
+        assert!(parse_channel_list("").is_empty());
+        assert!(parse_channel_list("only-a-name\n").is_empty());
     }
 
     #[test]

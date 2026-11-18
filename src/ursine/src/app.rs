@@ -495,8 +495,9 @@ pub enum Message {
     StoreReposLoaded(u64, u64, Result<Vec<ursine_api::NixRepository>, ApiError>),
     StoreRepoNameChanged(String),
     StoreRepoUrlChanged(String),
+    StoreScopeChanged(usize),
     StoreRepoAdd,
-    StoreRepoRemoveRequested(String, String),
+    StoreRepoRemoveRequested(String, bool, ursine_api::NixRepoSource),
     StoreRepoRemoveConfirmed,
     StoreRepoRemoveCancelled,
     StoreRepoFinished(
@@ -1946,13 +1947,22 @@ impl cosmic::Application for App {
                             self.token(),
                             name,
                             url,
+                            self.store.system,
                             self.store.current_scope().as_user(),
                         ),
                     );
                 }
             }
-            Message::StoreRepoRemoveRequested(name, scope) => {
-                self.store.pending_repo_remove = Some((name, scope));
+            Message::StoreScopeChanged(index) => {
+                let system = index == 0;
+                if system != self.store.system {
+                    self.store.system = system;
+                    self.store.pending_repo_remove = None;
+                    return self.load_store();
+                }
+            }
+            Message::StoreRepoRemoveRequested(name, system, source) => {
+                self.store.pending_repo_remove = Some((name, system, source));
             }
             Message::StoreRepoRemoveConfirmed => {
                 // Keep the pending row when a search is running: the
@@ -1960,13 +1970,14 @@ impl cosmic::Application for App {
                 if self.store.action_busy || self.store.search_busy {
                     return Task::none();
                 }
-                if let Some((name, scope)) = self.store.pending_repo_remove.take() {
+                if let Some((name, system, source)) = self.store.pending_repo_remove.take() {
                     return self.store_repo_action(
-                        "Registry entry removed.",
+                        "Repository removed.",
                         client::nix_remove_repository(
                             self.token(),
                             name,
-                            Some(scope),
+                            system,
+                            source,
                             self.store.current_scope().as_user(),
                         ),
                     );
@@ -6231,6 +6242,7 @@ impl App {
         let as_user = scope.as_user();
         let repos_as_user = scope.as_user();
         let repos_seq = self.store.repo_seq;
+        let repos_system = self.store.system;
         let snapshot = Task::future(async move {
             Message::StoreLoaded(epoch, scope, client::store_snapshot(token, as_user).await)
         })
@@ -6239,7 +6251,7 @@ impl App {
             Message::StoreReposLoaded(
                 epoch,
                 repos_seq,
-                client::nix_repositories(repos_token, repos_as_user).await,
+                client::nix_repositories(repos_token, repos_system, repos_as_user).await,
             )
         })
         .map(cosmic::Action::App);

@@ -333,14 +333,18 @@ pub struct StoreState {
     pub search_query: String,
     /// Registry flake the search runs against (default `nixpkgs`).
     pub search_repo: String,
-    /// Flake registry entries for the target user (+ global, read-only).
+    /// Configured repositories for the selected scope (builtin defaults
+    /// are never listed).
     pub repositories: Vec<ursine_api::NixRepository>,
+    /// Repository scope: `true` = system registry + root channels,
+    /// `false` = the target user's.
+    pub system: bool,
     /// Add-repository form inputs.
     pub repo_name: String,
     pub repo_url: String,
-    /// Repository waiting for the remove confirmation.
-    /// (name, scope) of the registry row awaiting confirmation.
-    pub pending_repo_remove: Option<(String, String)>,
+    /// Repository waiting for the remove confirmation:
+    /// (name, system scope, source) of the row.
+    pub pending_repo_remove: Option<(String, bool, ursine_api::NixRepoSource)>,
     /// Bumped after every registry mutation: an in-flight list reply
     /// that predates it is stale and gets dropped.
     pub repo_seq: u64,
@@ -395,6 +399,7 @@ impl Default for StoreState {
             search_query: String::new(),
             search_repo: "nixpkgs".to_string(),
             repositories: Vec::new(),
+            system: true,
             repo_name: String::new(),
             repo_url: String::new(),
             pending_repo_remove: None,
@@ -605,11 +610,15 @@ impl StoreState {
                 destructive: false,
             });
         }
-        if let Some((name, scope)) = &self.pending_repo_remove {
-            let question = if scope == "global" {
-                format!("Remove the system repository {name}?")
+        if let Some((name, system, source)) = &self.pending_repo_remove {
+            let kind = match source {
+                ursine_api::NixRepoSource::Channel => "channel",
+                ursine_api::NixRepoSource::Registry => "repository",
+            };
+            let question = if *system {
+                format!("Remove the system {kind} {name}?")
             } else {
-                format!("Remove the repository {name}?")
+                format!("Remove the {kind} {name}?")
             };
             confirms.push(ConfirmVm {
                 title: "Confirm repository removal".to_string(),
@@ -625,12 +634,22 @@ impl StoreState {
         }
 
         // --- Scope ---
-        let mut scope_items: Vec<Element<'_, Message>> = vec![settings::item(
-            "Target user",
-            text_input("Signed-in user", self.as_user_input.clone())
-                .on_input(Message::StoreAsUserChanged),
-        )
-        .into()];
+        // Same control as the flatpak screen: the dropdown picks the
+        // installation, the target user picks whose profile it acts on.
+        let installation = dropdown(
+            vec!["System", "User"],
+            Some(usize::from(!self.system)),
+            Message::StoreScopeChanged,
+        );
+        let mut scope_items: Vec<Element<'_, Message>> = vec![
+            settings::item("Installation", installation).into(),
+            settings::item(
+                "Target user",
+                text_input("Signed-in user", self.as_user_input.clone())
+                    .on_input(Message::StoreAsUserChanged),
+            )
+            .into(),
+        ];
         if self.needs_load() {
             scope_items.push(
                 settings::item(
@@ -793,7 +812,8 @@ impl StoreState {
                     (enabled && !self.action_busy && !self.search_busy).then_some(
                         Message::StoreRepoRemoveRequested(
                             repository.name.clone(),
-                            repository.scope.clone(),
+                            self.system,
+                            repository.source,
                         ),
                     ),
                 )

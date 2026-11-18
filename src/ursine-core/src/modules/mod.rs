@@ -217,7 +217,7 @@ pub fn action_name(action: &Action) -> &'static str {
         Action::UpdateFlatpakApp { .. } => "update_flatpak_app",
         Action::RemoveFlatpakOrphans { .. } => "remove_flatpak_orphans",
         Action::Search { .. } => "search",
-        Action::ListNixRepositories => "list_nix_repositories",
+        Action::ListNixRepositories { .. } => "list_nix_repositories",
         Action::AddNixRepository { .. } => "add_nix_repository",
         Action::RemoveNixRepository { .. } => "remove_nix_repository",
         Action::Install { .. } => "install",

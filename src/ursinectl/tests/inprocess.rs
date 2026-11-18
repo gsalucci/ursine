@@ -997,7 +997,11 @@ async fn response_shapes_match_the_contract() {
     let status = call(&daemon, &token, ModuleId::System, Action::Status)
         .await
         .unwrap();
-    assert_eq!(status["protocol_version"], 5, "{status}");
+    assert_eq!(
+        status["protocol_version"],
+        ursine_api::PROTOCOL_VERSION,
+        "{status}"
+    );
     assert!(status["version"].is_string(), "{status}");
     assert!(status["auth"].is_string(), "{status}");
 

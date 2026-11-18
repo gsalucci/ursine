@@ -127,9 +127,12 @@ list_nix_updates (on-demand lock-compare update check),
 diff_closures, store_gc, prune_generations, list_nix_repositories,
 add_nix_repository, remove_nix_repository.
 search takes repo= (default nixpkgs) to run against any registry
-flake; remove_nix_repository is destructive and requires --yes. Its
-optional scope selects the registry: user (default) edits the target
-user's file, global edits the system /etc/nix/registry.json.
+flake. list_nix_repositories shows the configured repositories of one
+scope: system=true selects the system /etc/nix/registry.json plus
+root's channels, the default the target user's. Builtin registry
+defaults are never listed. remove_nix_repository is destructive and
+requires --yes: source=registry (default) edits the selected registry,
+source=channel runs nix-channel --remove.
 .TP
 .B packages_apk
 list_apk, search_apk, refresh_apk, list_apk_repositories,

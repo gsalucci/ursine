@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Nix repositories follow the FeralOS model** (user decision): the section
+  now has the same `System | User` scope dropdown as Flatpak and lists only
+  *configured* entries — the scope's flake registry plus its `nix-channel`
+  channels (a channel fills a name the registry does not define). Rows keep
+  the apk shape (name, URL, Remove); `Remove` routes by source
+  (`nix registry remove`, the system registry file, `nix-channel --remove`).
+  Builtin registry defaults are never listed and can no longer be removed:
+  there is no file to edit and no way for a user to restore one.
+  Wire protocol v6 (`ListNixRepositories`/`AddNixRepository`/
+  `RemoveNixRepository` carry `system`; repositories carry `source`).
+
 ## [0.39.3] — 2026-11-18
 
 ### Fixed

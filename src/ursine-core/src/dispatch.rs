@@ -519,7 +519,7 @@ fn uses_profile(action: &Action) -> bool {
             | Action::PruneGenerations { .. }
             // Flake registry: the user registry lives in the target's home
             // (`~/.config/nix/registry.json`), so the actions are user-scoped.
-            | Action::ListNixRepositories
+            | Action::ListNixRepositories { .. }
             | Action::AddNixRepository { .. }
             | Action::RemoveNixRepository { .. }
     )
@@ -837,7 +837,7 @@ mod tests {
             token: Some(token),
             body: RequestBody::Call {
                 module: ModuleId::PackagesNix,
-                action: Action::ListNixRepositories,
+                action: Action::ListNixRepositories { system: false },
                 as_user: Some("skea999".into()),
             },
         };
@@ -874,6 +874,7 @@ mod tests {
                 action: Action::AddNixRepository {
                     name: "nixpkgs".into(),
                     url: "github:NixOS/nixpkgs".into(),
+                    system: false,
                 },
                 as_user: Some("someone-else".into()),
             },

@@ -29,6 +29,13 @@ const SU_CANDIDATES: [&str; 5] = [
     "/sbin/su",
     "/usr/sbin/su",
 ];
+const NIX_CHANNEL_CANDIDATES: [&str; 4] = [
+    "/nix/var/nix/profiles/default/bin/nix-channel",
+    "/run/current-system/sw/bin/nix-channel",
+    "/usr/bin/nix-channel",
+    "/bin/nix-channel",
+];
+
 const NIX_CANDIDATES: [&str; 4] = [
     "/nix/var/nix/profiles/default/bin/nix",
     "/run/current-system/sw/bin/nix",
@@ -50,6 +57,11 @@ pub(super) fn su_path() -> Result<&'static str, ApiError> {
 
 pub(super) fn nix_path() -> Result<&'static str, ApiError> {
     trusted_path(&NIX_CANDIDATES, "nix")
+}
+
+/// `nix-channel` is a separate legacy binary (not a `nix` subcommand).
+pub(super) fn nix_channel_path() -> Result<&'static str, ApiError> {
+    trusted_path(&NIX_CHANNEL_CANDIDATES, "nix-channel")
 }
 
 /// Flake refs / attr names we accept: no spaces, quotes, semicolons, `$`, etc.

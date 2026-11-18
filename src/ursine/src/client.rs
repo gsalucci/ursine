@@ -489,12 +489,13 @@ pub async fn nix_list_updates(token: SessionToken) -> Result<ursine_api::NixUpda
 
 pub async fn nix_repositories(
     token: SessionToken,
+    system: bool,
     as_user: Option<String>,
 ) -> Result<Vec<ursine_api::NixRepository>, ApiError> {
     let value = call_with_timeout(
         token,
         ModuleId::PackagesNix,
-        Action::ListNixRepositories,
+        Action::ListNixRepositories { system },
         as_user,
         MUTATE_TIMEOUT,
     )
@@ -510,12 +511,13 @@ pub async fn nix_add_repository(
     token: SessionToken,
     name: String,
     url: String,
+    system: bool,
     as_user: Option<String>,
 ) -> Result<Vec<ursine_api::NixRepository>, ApiError> {
     let value = call_with_timeout(
         token,
         ModuleId::PackagesNix,
-        Action::AddNixRepository { name, url },
+        Action::AddNixRepository { name, url, system },
         as_user,
         MUTATE_TIMEOUT,
     )
@@ -530,13 +532,18 @@ pub async fn nix_add_repository(
 pub async fn nix_remove_repository(
     token: SessionToken,
     name: String,
-    scope: Option<String>,
+    system: bool,
+    source: ursine_api::NixRepoSource,
     as_user: Option<String>,
 ) -> Result<Vec<ursine_api::NixRepository>, ApiError> {
     let value = call_with_timeout(
         token,
         ModuleId::PackagesNix,
-        Action::RemoveNixRepository { name, scope },
+        Action::RemoveNixRepository {
+            name,
+            system,
+            source,
+        },
         as_user,
         MUTATE_TIMEOUT,
     )

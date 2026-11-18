@@ -58,7 +58,7 @@ pub use niri::{
 };
 pub use nix::{
     installable_from_attr, is_safe_installable_atom, normalize_installable, validate_installable,
-    CommandOutcome, InstalledPackage, NixRepository, NixUpdates, SearchResult,
+    CommandOutcome, InstalledPackage, NixRepoSource, NixRepository, NixUpdates, SearchResult,
 };
 pub use packages::{
     ApkPackage, ApkRepository, ApkUpdate, FlatpakInfo, FlatpakPackage, FlatpakRefKind,

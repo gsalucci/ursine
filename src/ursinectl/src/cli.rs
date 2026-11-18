@@ -756,7 +756,8 @@ mod tests {
             },
             RemoveNixRepository {
                 name: "myflake".into(),
-                scope: None,
+                system: true,
+                source: ursine_api::NixRepoSource::Channel,
             },
             RemoveFlatpakRemote {
                 name: "flathub".into(),

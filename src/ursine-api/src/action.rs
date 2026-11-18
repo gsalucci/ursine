@@ -57,20 +57,33 @@ pub enum Action {
         #[serde(default)]
         repo: Option<String>,
     },
-    /// Flake registry entries (`nix registry list`).
-    ListNixRepositories,
-    /// Add a user-scope registry entry (`nix registry add`).
+    /// Configured repositories for one scope: registry entries
+    /// (`nix registry list`) plus channels (`nix-channel --list`).
+    /// Builtin registry defaults are never returned.
+    ListNixRepositories {
+        /// `true` = the system registry and root's channels; `false` =
+        /// the target user's.
+        #[serde(default)]
+        system: bool,
+    },
+    /// Add or replace a registry entry in the chosen scope.
     AddNixRepository {
         name: String,
         url: String,
+        /// `true` = system registry file (root-owned); `false` = the
+        /// target user's registry via `nix registry add`.
+        #[serde(default)]
+        system: bool,
     },
-    /// Remove a registry entry: `scope` `user`/`default` (absent =
-    /// user) edits the target user's registry via `nix registry
-    /// remove`; `global` edits the system registry file directly.
+    /// Remove one configured repository entry.
     RemoveNixRepository {
         name: String,
+        /// `true` = system scope, `false` = the target user's.
         #[serde(default)]
-        scope: Option<String>,
+        system: bool,
+        /// Registry entry or channel (the row says which).
+        #[serde(default)]
+        source: crate::NixRepoSource,
     },
     /// Install a package into the target user's profile.
     Install {
