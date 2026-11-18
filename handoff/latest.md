@@ -8,7 +8,7 @@ See `AGENTS.md` for project context and milestone history.
 
 ## Session 2026-11-18 — binding gates at max severity, artifacts layout, host acceptance (uncommitted)
 
-**Status**: uncommitted on top of `4d6265c`. `scripts/dev.sh check` green (fmt + 515 tests, single clippy pass), `scripts/dev.sh verify` green (static all + docs + release + installer smoke), Nix lint/eval green (`0.39.1`), jscpd **0 clones**. Nothing pushed.
+**Status**: pushed as `3889791` to `main` (`34efb66..3889791`). `scripts/dev.sh check` green (fmt + 515 tests, single clippy pass), `scripts/dev.sh verify` green (static all + docs + release + installer smoke), Nix lint/eval green (`0.39.1`), jscpd **0 clones**. No tag yet (needs a version bump).
 
 - **All gates binding**: `scripts/static-check.sh` fails when a tool is missing (no skips); jscpd 50 tokens threshold 0 on Rust + shell; advisories zero-tolerance via `cargo deny` + `cargo audit` (ignores only in `deny.toml` + documented exceptions). `ci/duplicates-baseline.txt` deleted — generated state is never committed; `cargo tree -d` writes a report into the run dir (90 duplicate crate versions, all from the pinned libcosmic/iced graph).
 - **Artifacts layout**: `scripts/run-dir.sh` creates and prunes `artifacts/container-dev/<UTC timestamp>/` (newest 10); static, duplicates, release, package and smoke trees all write there; `URSINE_RUN_DIR` is forwarded so nested gates share one directory; CI sets it per run. No `.gitkeep`, no `container dev` spaces.
@@ -17,7 +17,7 @@ See `AGENTS.md` for project context and milestone history.
 - **Host acceptance replaces the dev path**: `scripts/build-gui-dev.sh` and `nix/dev-flake.nix` deleted — they ran `nix run` on the host and violated the container-only rule. `scripts/test-host.sh` is the single allowed host interaction and runs **after the tag** without touching the repository: ensure the `flake:ursine` registry entry, `nix flake metadata --refresh` + `nix eval --refresh` for the published version, install/upgrade the published GitHub flake (reinstall when the version differs), `sudo ursine-activate`, then check `auth: shadow`, the live service and `ursinectl system status`.
 - **Fixes found by the gate**: GUI compile set (`pub(crate) use crate::ui`, `logs` container import, Bluetooth Scan button via `ui::header_with`), `elidable_lifetime_names` in `ui::header`, `redundant_pub_crate` allows on the private tooling/atomic/prelude modules, `Daemon::assemble` wiring for both binaries.
 
-Next: after the next tag is published, the user runs `scripts/test-host.sh`; then the commit (conventional split) when instructed.
+Next: watch the CI run for `3889791` (push/PR path runs `scripts/verify.sh`, the same sequence as `dev.sh verify`); after the next tag is published the user runs `scripts/test-host.sh`.
 
 ## Session 2026-11-17 — CI pipeline split + single-pass gate, release 0.39.1 (main, tag `v0.39.1`)
 
