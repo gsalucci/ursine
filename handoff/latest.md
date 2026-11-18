@@ -6,6 +6,16 @@
 See `state/session-state.json` for current goals, decisions, risks, and next actions.
 See `AGENTS.md` for project context and milestone history.
 
+## Release 0.39.3 — nix repositories in the GUI (2026-11-18)
+
+**Status**: tag `v0.39.3` at `cf6bd97`, tag CI `44320374782` green (`verify` published `draft=false`, `nix` pinned `53eade8` + attached the flake). Host upgraded by `scripts/test-host.sh` to 0.39.3 and the daemon now answers the registry with the user entry.
+
+- **Symptom**: nix → Repositories showed "only the default repository (nothing extra)"; `flake:ursine` invisible; rows absent while apk/flatpak worked.
+- **Root cause (audit-log evidence)**: the GUI sends `as_user` with `list_nix_repositories`; dispatch only honors `as_user` for actions in `uses_profile`, and the three registry actions were missing, so every call returned `invalid: as_user is only valid for user-scoped …`. The GUI cleared the section and rendered the empty state.
+- **Fix (`637f121`)**: `ListNixRepositories`/`AddNixRepository`/`RemoveNixRepository` are user-scoped (the registry lives in the target's home); a non-root caller may only target its own account for add/remove (same boundary as theming/crontab/Flatpak user scope); empty-state text is now "No flake registry entries.". Two dispatch tests cover own-target acceptance and the foreign-target rejection. Rows keep the apk shape: name, URL, Remove.
+- **Verified on the host**: `ursinectl --json nix list_nix_repositories --as-user gab` returns `{"name":"ursine","url":"github:skea999/ursine","scope":"user"}` first, then the global entries.
+- **Also validated in this release**: the nix job's anonymous tarball smoke and forced `--draft=false` (introduced after the 0.39.2 draft incident) — 0.39.3 was public with zero manual steps.
+
 ## Session 2026-11-18 — binding gates at max severity, artifacts layout, host acceptance (uncommitted)
 
 **Status**: released **0.39.2** (tag `v0.39.2` at `45fcd0f`); tag CI `44298587484` green (`verify` published the tarball+checksum, `nix` smoke+pinned+attached the flake source). Pin `b5a03bc` on `main` (0.39.2). Earlier gate work pushed as `3889791` (`34efb66..3889791`). `scripts/dev.sh check` green (fmt + 515 tests, single clippy pass), `scripts/dev.sh verify` green (static all + docs + release + installer smoke), Nix lint/eval green (`0.39.1`), jscpd **0 clones**. No tag yet (needs a version bump).
