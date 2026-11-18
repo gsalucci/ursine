@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.39.3] — 2026-11-18
+
 ### Fixed
 
 - **Nix repositories rendered empty in the GUI**: `list_nix_repositories` and
