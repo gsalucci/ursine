@@ -1,6 +1,6 @@
 {
   "goal": "Ursine — FeralOS complete control center (Webmin-style): root daemon + libcosmic GUI (v1), full module coverage (v2), OIDC+web (v3, memory-safe stack), Incus UI (v4), ZFS+Pirateus (v5), multi-distro (v6). Intent source of truth: docs/intent/ursine.md.",
-  "status": "v0.40.2 RELEASED (tag CI 44502816747 green, pin d3d8c52). Nix screen: scope System|User, user dropdown (desktop accounts), profile owner in the installed title; host on 0.40.2.",
+  "status": "v0.41.0 RELEASED (tag at 75d1aa3, CI 44539840596 green, pin a6bb188). Collapsible icon sidebar; host on 0.41.0.",
   "active_goals": [
     "RELEASE 0.22.0 (2026-10-29): GTK3 chain + eog/galculator targets + minimize toggle + log viewer; gate green; tagged for nix release and VM smoke.",
     "v0.18.4 INIT HARDENING (2026-10-26): PID1/init detection, root-owned daemon/PAM copies, dinit unit idempotency/stale cleanup, install.sh dinit defaults/restart, CI regression coverage. Review-closed; tag pending in this release commit.",
@@ -15,9 +15,9 @@
     "Nix package chain 2026-10-21: `ursine` -> `ursined` -> `ursine-activate`; daemon owns tools/packaging. Profile discovery is generic via SUDO_HOME/SUDO_USER/default. Staged tests and Nix checks green; host service activation pending root."
   ],
   "next_actions": [
-    "User: reopen the GUI — Scope System hides the user choice; User shows the desktop-account dropdown; the Installed title names the profile owner.",
-    "FeralOS install finding: host has the nixos-26.05 channel but no /etc/nix/registry.json pin; add it from the System scope (nixpkgs = github:NixOS/nixpkgs/nixos-26.05).",
-    "Dependency duplicates stay report-only (90 versions, all from the pinned libcosmic/iced graph)."
+    "User: reopen the GUI — sidebar toggle collapses to icons with tooltips; expanded header shows the FeralOS subtitle and the footer the user + version.",
+    "Pending from the user: details on the package-list green background (screenshot + whether cosmic-settings shows the same) before touching theme colors.",
+    "FeralOS install finding: host has the nixos-26.05 channel but no /etc/nix/registry.json pin; add it from the System scope."
   ],
   "key_decisions": [
     "MAX-SEVERITY BINDING (2026-11-18, user): the code must pass EVERY test that can be run on it, calibrated to the strictest setting available, and any finding blocks commit, push and tag. No report-only mode, no thresholds that let findings pass, no silent skip when a tool is missing. Layers: fmt; single-pass clippy -D warnings + the whole workspace suite (unit + integration + functional); rustdoc -D warnings; repo lints (typos, editorconfig, shellcheck, shfmt, taplo, actionlint, zizmor); SAST (gitleaks full history, cargo-geiger); deps (cargo-deny advisories/licenses/bans/sources with documented upstream-only ignores, cargo-audit, cargo-machete); duplicates; SBOM; markdownlint. This is a root-capable distro control app: code must be perfect, no errors and no hacks. Tests never overlap: every check runs exactly once per gate (no duplicate CI job or step, release build is not a second test run). Overlap is fixed by removing the redundant execution, never by deleting a test unless it is a true duplicate (same assertion, same surface).",
@@ -92,7 +92,8 @@
     "2026-11-18 HOST ACCEPTANCE FIRST RUN: test-host.sh works (registry -> refresh -> profile install -> sudo ursine-activate -> checks). It exposed that the 0.39.2 GitHub release was left as a DRAFT: anonymous asset download 404s, so the flake pinned an unfetchable tarball. Release published manually; CI fixed — the nix smoke now downloads assets anonymously (a draft fails the job) and the publish step forces --draft=false.",
     "2026-11-18 NIX REGISTRY as_user: the GUI legitimately sends as_user with list/add/remove nix repository; the dispatch allowlist was missing those actions, so the section rendered empty. They are user-scoped now; non-root may only target its own account for registry writes; root may retarget (ursinectl). Released as 0.39.3.",
     "2026-11-18 NIX REPOSITORY SCOPES (user decision, FeralOS parity): nix Repositories has the Flatpak-style System|User dropdown; it lists only configured registry entries + channels per scope and never the builtin global defaults (they have no file and no restore path). Remove routes by source; system add merges into /etc/nix/registry.json; wire protocol v6. Released as 0.40.0; host verified.",
-    "2026-11-19 NIX SCOPE UI (user decision): System scope hides the target user (registry only; profile list stays on the signed-in account because root's profile is not readable by a non-root user). User scope offers a dropdown of desktop accounts (uid 1000..60000, /home, real shell) with the plain input until the list loads. Installed title shows the profile owner. Released 0.40.1 and 0.40.2; host on 0.40.2."
+    "2026-11-19 NIX SCOPE UI (user decision): System scope hides the target user (registry only; profile list stays on the signed-in account because root's profile is not readable by a non-root user). User scope offers a dropdown of desktop accounts (uid 1000..60000, /home, real shell) with the plain input until the list loads. Installed title shows the profile owner. Released 0.40.1 and 0.40.2; host on 0.40.2.",
+    "2026-11-19 SIDEBAR: collapsible icon rail (64 px collapsed, 240 px expanded) with per-screen symbolic icons and tooltips; brand subtitle + version in the footer. Released as 0.41.0. In-app state only, no config or wire change."
   ],
   "risks": [
     "v0.18.3 shipped before the Tier 2 review gate; 0.18.4 closes the findings. Never release before review closure again.",

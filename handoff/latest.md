@@ -6,6 +6,14 @@
 See `state/session-state.json` for current goals, decisions, risks, and next actions.
 See `AGENTS.md` for project context and milestone history.
 
+## Release 0.41.0 — collapsible icon sidebar (2026-11-19)
+
+**Status**: tag `v0.41.0` at `75d1aa3`, CI `44539840596` green (`verify` published `draft=false`, `nix` pinned `a6bb188`). Host on 0.41.0.
+
+- Sidebar (software-center rail): every screen has a symbolic icon; a header toggle collapses the rail to a 64 px icon strip (right-side tooltips name each row), the expanded header carries the FeralOS subtitle, and the footer shows the signed-in user and the version. Sign-out has the log-out icon in both modes.
+- `nav_collapsed` is in-app state only (no config/wire change).
+- Layout: `button::custom(row![icon, label])` + `.selected(...)`; icon-only rows wrapped in `widget::tooltip`.
+
 ## Releases 0.40.1 / 0.40.2 — nix scope UI (2026-11-19)
 
 **Status**: `v0.40.1` (tag CI `44497425808` green, pin `6cc4359`) and `v0.40.2` (tag CI `44502816747` green, pin `d3d8c52`). `scripts/test-host.sh` upgraded the host twice; it now runs 0.40.2 / protocol 6.
