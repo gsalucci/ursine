@@ -9,8 +9,8 @@
 # as the manual fallback.
 #   sha256sum ursine-<ver>-x86_64-musl.tar.gz
 {
-  version = "0.41.0";
-  url = "https://github.com/skea999/ursine/releases/download/v0.41.0/ursine-v0.41.0-x86_64-musl.tar.gz";
+  version = "0.42.0";
+  url = "https://github.com/skea999/ursine/releases/download/v0.42.0/ursine-v0.42.0-x86_64-musl.tar.gz";
   # sha256 of the tarball (hex, as printed by sha256sum)
-  sha256 = "6018b1095343222aa2432062148e4b4028add2573d51d911f0f1081571ff0129";
+  sha256 = "6ee3164008ea1dc754b4fbf39989207853f37b506733aa7ffc49d13da84e43f3";
 }
