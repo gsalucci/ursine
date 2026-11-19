@@ -6,6 +6,14 @@
 See `state/session-state.json` for current goals, decisions, risks, and next actions.
 See `AGENTS.md` for project context and milestone history.
 
+## Releases 0.40.1 / 0.40.2 — nix scope UI (2026-11-19)
+
+**Status**: `v0.40.1` (tag CI `44497425808` green, pin `6cc4359`) and `v0.40.2` (tag CI `44502816747` green, pin `d3d8c52`). `scripts/test-host.sh` upgraded the host twice; it now runs 0.40.2 / protocol 6.
+
+- **0.40.1 (`c1b030f`)**: `System` scope hides the target user — the system registry has no target, while the installed list stays on the signed-in account (a non-root user cannot read root's profile). The user scope offers a dropdown of normal login accounts (the plain input stays until the list loads). The installed list names its profile owner (`Installed (n) — <user>`); the screen opens on the user scope.
+- **0.40.2 (`ee2e71e`)**: the dropdown keeps desktop accounts only (uid 1000..60000, home under `/home`, real shell) — the daemon's `ListUsers` includes `greeter` (uid 1002, `/var/lib/greetd`). Rule extracted to `desktop_accounts()` with a unit test.
+- **Host data verified**: `users list_users` returns `gab` (1000, fish, /home/gab) and `greeter` (1002, /var/lib/greetd); the dropdown now shows only `gab`.
+
 ## Release 0.40.0 — nix repository scopes (FeralOS model), protocol v6 (2026-11-18)
 
 **Status**: tag `v0.40.0` at `99b3a2c`, CI `44363193354` green (`verify` published `draft=false`, `nix` pinned `baff114`). `scripts/test-host.sh` upgraded the host to 0.40.0 (`protocol_version: 6`). Feature commit `d2e7b2b`.

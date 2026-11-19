@@ -1224,6 +1224,26 @@ mod tests {
     }
 
     #[test]
+    fn dropdown_keeps_desktop_accounts_only() {
+        let user = |uid, name: &str, home: &str, shell: &str| UserSummary {
+            uid,
+            name: name.into(),
+            fullname: String::new(),
+            shell: shell.into(),
+            home: home.into(),
+            groups: Vec::new(),
+        };
+        let users = vec![
+            user(1000, "gab", "/home/gab", "/usr/bin/fish"),
+            user(1002, "greeter", "/var/lib/greetd", "/bin/sh"),
+            user(1003, "daemonish", "/home/daemonish", "/sbin/nologin"),
+            user(0, "root", "/root", "/bin/sh"),
+            user(70000, "high", "/home/high", "/bin/sh"),
+        ];
+        assert_eq!(desktop_accounts(users), vec!["gab".to_string()]);
+    }
+
+    #[test]
     fn config_snapshot_parses_module_switches() {
         let snapshot = parse_config_snapshot(serde_json::json!({
             "modules": {"packages_nix": true, "snapshots": "auto"},
@@ -1377,10 +1397,16 @@ pub async fn login_users(token: SessionToken) -> Result<Vec<String>, ApiError> {
         .ok_or_else(|| ApiError::internal("daemon users response has no list"))?;
     let users: Vec<UserSummary> = serde_json::from_value(users)
         .map_err(|e| ApiError::internal(format!("cannot read users: {e}")))?;
-    // Desktop accounts only: the daemon accepts any uid 1000..60000, but
-    // service accounts like `greeter` live outside /home, use a nologin
-    // shell or have no home at all — offering them here would fail later.
-    Ok(users
+    Ok(desktop_accounts(users))
+}
+
+/// Desktop accounts offered by the target-user dropdown.
+///
+/// The daemon accepts any uid 1000..60000, but service accounts such as
+/// `greeter` live outside `/home`, use a nologin shell or have no home —
+/// offering them here would fail later.
+fn desktop_accounts(users: Vec<UserSummary>) -> Vec<String> {
+    users
         .into_iter()
         .filter(|user| {
             (1000..60000).contains(&user.uid)
@@ -1389,7 +1415,7 @@ pub async fn login_users(token: SessionToken) -> Result<Vec<String>, ApiError> {
                 && !user.shell.ends_with("false")
         })
         .map(|user| user.name)
-        .collect())
+        .collect()
 }
 
 /// Users and system groups in one refresh.

@@ -4,6 +4,13 @@
 
 ## [0.40.2] — 2026-11-19
 
+### Fixed
+
+- **Target-user dropdown lists desktop accounts only**: the daemon's user list
+  includes service accounts (e.g. `greeter`, uid 1002, home `/var/lib/greetd`);
+  the dropdown keeps uid 1000..60000 with a home under `/home` and a real
+  shell, and the rule is unit-tested.
+
 ## [0.40.1] — 2026-11-19
 
 ### Changed
