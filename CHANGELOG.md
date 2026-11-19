@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.45.0] — 2026-11-20
+
 ### Fixed
 
 - **Password field focused on open**: the initial `text_input::focus` ran
