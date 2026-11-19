@@ -1377,9 +1377,17 @@ pub async fn login_users(token: SessionToken) -> Result<Vec<String>, ApiError> {
         .ok_or_else(|| ApiError::internal("daemon users response has no list"))?;
     let users: Vec<UserSummary> = serde_json::from_value(users)
         .map_err(|e| ApiError::internal(format!("cannot read users: {e}")))?;
+    // Desktop accounts only: the daemon accepts any uid 1000..60000, but
+    // service accounts like `greeter` live outside /home, use a nologin
+    // shell or have no home at all — offering them here would fail later.
     Ok(users
         .into_iter()
-        .filter(|user| user.uid >= 1000)
+        .filter(|user| {
+            (1000..60000).contains(&user.uid)
+                && user.home.starts_with("/home/")
+                && !user.shell.ends_with("nologin")
+                && !user.shell.ends_with("false")
+        })
         .map(|user| user.name)
         .collect())
 }
