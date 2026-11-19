@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Responsive layout**: the window width drives three classes — compact
+  (< 640 px: icon-only rail, stacked package/repository rows, tight padding,
+  dialogs clamped to the window), medium (auto icon rail, inline rows) and
+  wide (content capped at 1200 px for readability). Package lists and
+  repository rows stack their actions under the text on narrow windows, and
+  dialogs never exceed `min(720, width - 32)`. Breakpoint helpers are unit
+  tested; no wire or config change.
+
 ## [0.41.0] — 2026-11-19
 
 ### Added

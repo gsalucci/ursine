@@ -39,8 +39,10 @@ fn package_row<'a>(
     description: Option<&String>,
     repository: Option<String>,
     actions: Vec<Element<'a, Message>>,
+    compact: bool,
 ) -> crate::package_ui::RowVm<'a> {
     crate::package_ui::RowVm {
+        compact,
         title: format!("{name} {version}"),
         description: description
             .map(String::as_str)
@@ -337,11 +339,15 @@ impl PackagesState {
         self.flatpak_updates = updates;
     }
 
-    pub fn view(&self, updates_auto: ursine_api::UpdatesAuto) -> Element<'_, Message> {
+    pub fn view(
+        &self,
+        updates_auto: ursine_api::UpdatesAuto,
+        compact: bool,
+    ) -> Element<'_, Message> {
         let Some(kind) = self.kind else {
             return text("Select a package source.").into();
         };
-        crate::package_ui::view(self.vm(kind, updates_auto))
+        crate::package_ui::view(self.vm(kind, updates_auto, compact))
     }
 
     /// Everything the shared view renders, as data for this manager.
@@ -349,6 +355,7 @@ impl PackagesState {
         &self,
         kind: PackageKind,
         updates_auto: ursine_api::UpdatesAuto,
+        compact: bool,
     ) -> crate::package_ui::PackageVm<'_> {
         use crate::package_ui::{
             page_bounds, text_row, ConfirmVm, FilterVm, ListVm, PackageVm, RefreshVm, RowVm,
@@ -659,6 +666,7 @@ impl PackagesState {
                         label,
                         Some(repository.url.clone()),
                         actions,
+                        compact,
                     ));
                 }
                 repo_items.push(
@@ -702,6 +710,7 @@ impl PackagesState {
                                         .then_some(Message::FlatpakRemoteRemoveRequested(name)),
                                 )
                                 .into()],
+                            compact,
                         ));
                     }
                 }
@@ -807,6 +816,7 @@ impl PackagesState {
                                 )
                             }),
                             actions,
+                            compact,
                         )
                     })
                     .collect();
@@ -876,6 +886,7 @@ impl PackagesState {
                             package.description.as_ref(),
                             Some(line),
                             actions,
+                            compact,
                         )
                     })
                     .collect();

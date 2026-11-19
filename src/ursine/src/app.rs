@@ -154,6 +154,8 @@ pub struct App {
     screen: Screen,
     /// Sidebar collapsed to icons only (modern software-center rail).
     nav_collapsed: bool,
+    /// Last window width in logical pixels (responsive breakpoints).
+    window_width: f32,
     session: Option<Session>,
     /// Bumped on sign-in/sign-out so late async results cannot repopulate a
     /// different session's screens.
@@ -696,6 +698,7 @@ impl cosmic::Application for App {
             apparmor: ApparmorState::default(),
             screen: Screen::Home,
             nav_collapsed: false,
+            window_width: 1200.0,
             session: None,
             epoch: 0,
             job: None,
@@ -2118,10 +2121,90 @@ impl cosmic::Application for App {
     /// One modal at a time, in priority order: pending confirmations
     /// → job progress (the window the confirm just used) → the
     /// half-page browsers (installed list, nix generations).
+    fn on_window_resize(&mut self, _id: cosmic::iced::window::Id, width: f32, _height: f32) {
+        self.window_width = width;
+    }
+
     fn dialog(&self) -> Option<Element<'_, Self::Message>> {
+        let inner = self.dialog_body()?;
+        let max = (self.window_width - 32.0).clamp(320.0, 720.0);
+        Some(cosmic::widget::container(inner).max_width(max).into())
+    }
+
+    fn view(&self) -> Element<'_, Self::Message> {
+        self.session.as_ref().map_or_else(
+            || self.login.view(),
+            |session| {
+                let content = match self.screen {
+                    Screen::Home => self.home.view(
+                        session.expires_in_secs,
+                        self.settings.config.as_ref().map(|config| &config.modules),
+                    ),
+                    Screen::Settings => self.settings.view(
+                        &self.home.caps,
+                        self.home.busy,
+                        self.home.error.as_deref(),
+                    ),
+                    Screen::Packages => self.package_manager_view(),
+                    Screen::Snapshots => self.snapshots.view(),
+                    Screen::Users => self.users.view(),
+                    Screen::Niri => self.niri.view(),
+                    Screen::Printers => self.printers.view(),
+                    Screen::Scanners => self.scanners.view(),
+                    Screen::Firewall => self.firewall.view(),
+                    Screen::Services => self.services.view(),
+                    Screen::Disks => self.disks.view(),
+                    Screen::Bluetooth => self.bluetooth.view(),
+                    Screen::Network => self.network.view(),
+                    Screen::Theming => self.theming.view(),
+                    Screen::Logs => self.logs.view(),
+                    Screen::Crontab => self.crontab.view(),
+                    Screen::Booster => self.booster.view(),
+                    Screen::Apparmor => self.apparmor.view(),
+                };
+                // Responsive chrome: tighter padding on small windows and a
+                // readable max width on large ones.
+                let padding = if self.is_compact() { 8 } else { 16 };
+                let body: Element<'_, Message> = if self.is_wide() {
+                    cosmic::widget::container(content)
+                        .max_width(CONTENT_MAX_WIDTH)
+                        .padding(padding)
+                        .into()
+                } else {
+                    cosmic::widget::container(content).padding(padding).into()
+                };
+                cosmic::iced::widget::row(vec![self.sidebar(), body])
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into()
+            },
+        )
+    }
+}
+
+/// Responsive width classes. The sidebar collapses at `COMPACT`, the
+/// content caps its width at `WIDE`.
+const COMPACT_WIDTH: f32 = 640.0;
+const WIDE_WIDTH: f32 = 1080.0;
+const CONTENT_MAX_WIDTH: f32 = 1200.0;
+
+/// Compact below 640 px: icon-only rail, stacked rows, tight padding.
+const fn compact_width(width: f32) -> bool {
+    width < COMPACT_WIDTH
+}
+
+/// Wide at 1080 px and up: the content caps its width for readability.
+const fn wide_width(width: f32) -> bool {
+    width >= WIDE_WIDTH
+}
+
+impl App {
+    /// Dialog body before the responsive width clamp.
+    fn dialog_body(&self) -> Option<Element<'_, Message>> {
         // Never over the login screen (stale pending state must not
         // survive a sign-out).
         self.session.as_ref()?;
+        let compact = self.is_compact();
         let updates_auto = self
             .settings
             .config
@@ -2129,11 +2212,15 @@ impl cosmic::Application for App {
             .map_or_else(UpdatesAuto::default, |config| config.updates);
         // 1) Confirmations of the active manager, stacked in one modal.
         let confirms = match self.package_tab {
-            PackageTab::Nix => self.store.vm(updates_auto.nix).confirms,
-            PackageTab::Apk => self.packages.vm(PackageKind::Apk, updates_auto).confirms,
+            PackageTab::Nix => self.store.vm(updates_auto.nix, compact).confirms,
+            PackageTab::Apk => {
+                self.packages
+                    .vm(PackageKind::Apk, updates_auto, compact)
+                    .confirms
+            }
             PackageTab::Flatpak => {
                 self.packages
-                    .vm(PackageKind::Flatpak, updates_auto)
+                    .vm(PackageKind::Flatpak, updates_auto, compact)
                     .confirms
             }
         };
@@ -2173,14 +2260,14 @@ impl cosmic::Application for App {
         match self.package_tab {
             PackageTab::Nix => {
                 if self.store.list_browser {
-                    let vm = self.store.vm(updates_auto.nix);
+                    let vm = self.store.vm(updates_auto.nix, compact);
                     return Some(crate::package_ui::list_dialog(
                         vm.list,
                         Message::StoreListBrowserClose,
                     ));
                 }
                 if self.store.generations_browser {
-                    let vm = self.store.vm(updates_auto.nix);
+                    let vm = self.store.vm(updates_auto.nix, compact);
                     if let Some(generations) = vm.generations {
                         return Some(crate::package_ui::generations_dialog(
                             generations,
@@ -2191,7 +2278,7 @@ impl cosmic::Application for App {
             }
             PackageTab::Apk => {
                 if self.packages.list_browser && self.packages.kind == Some(PackageKind::Apk) {
-                    let vm = self.packages.vm(PackageKind::Apk, updates_auto);
+                    let vm = self.packages.vm(PackageKind::Apk, updates_auto, compact);
                     return Some(crate::package_ui::list_dialog(
                         vm.list,
                         Message::PackageListBrowserClose,
@@ -2200,7 +2287,9 @@ impl cosmic::Application for App {
             }
             PackageTab::Flatpak => {
                 if self.packages.list_browser && self.packages.kind == Some(PackageKind::Flatpak) {
-                    let vm = self.packages.vm(PackageKind::Flatpak, updates_auto);
+                    let vm = self
+                        .packages
+                        .vm(PackageKind::Flatpak, updates_auto, compact);
                     return Some(crate::package_ui::list_dialog(
                         vm.list,
                         Message::PackageListBrowserClose,
@@ -2211,43 +2300,12 @@ impl cosmic::Application for App {
         None
     }
 
-    fn view(&self) -> Element<'_, Self::Message> {
-        self.session.as_ref().map_or_else(
-            || self.login.view(),
-            |session| {
-                let content = match self.screen {
-                    Screen::Home => self.home.view(
-                        session.expires_in_secs,
-                        self.settings.config.as_ref().map(|config| &config.modules),
-                    ),
-                    Screen::Settings => self.settings.view(
-                        &self.home.caps,
-                        self.home.busy,
-                        self.home.error.as_deref(),
-                    ),
-                    Screen::Packages => self.package_manager_view(),
-                    Screen::Snapshots => self.snapshots.view(),
-                    Screen::Users => self.users.view(),
-                    Screen::Niri => self.niri.view(),
-                    Screen::Printers => self.printers.view(),
-                    Screen::Scanners => self.scanners.view(),
-                    Screen::Firewall => self.firewall.view(),
-                    Screen::Services => self.services.view(),
-                    Screen::Disks => self.disks.view(),
-                    Screen::Bluetooth => self.bluetooth.view(),
-                    Screen::Network => self.network.view(),
-                    Screen::Theming => self.theming.view(),
-                    Screen::Logs => self.logs.view(),
-                    Screen::Crontab => self.crontab.view(),
-                    Screen::Booster => self.booster.view(),
-                    Screen::Apparmor => self.apparmor.view(),
-                };
-                cosmic::iced::widget::row(vec![self.sidebar(), content])
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .into()
-            },
-        )
+    fn is_compact(&self) -> bool {
+        compact_width(self.window_width)
+    }
+
+    fn is_wide(&self) -> bool {
+        wide_width(self.window_width)
     }
 }
 
@@ -2928,8 +2986,10 @@ impl App {
         ])
         .spacing(8);
         let content = match self.package_tab {
-            PackageTab::Nix => self.store.view(updates_auto.nix),
-            PackageTab::Apk | PackageTab::Flatpak => self.packages.view(updates_auto),
+            PackageTab::Nix => self.store.view(updates_auto.nix, self.is_compact()),
+            PackageTab::Apk | PackageTab::Flatpak => {
+                self.packages.view(updates_auto, self.is_compact())
+            }
         };
         // The job output lives in its own modal (Application::dialog).
         column(vec![tabs.into(), content]).spacing(12).into()
@@ -3894,7 +3954,7 @@ impl App {
             (Screen::Settings, "Settings", "emblem-system-symbolic"),
         ];
 
-        let collapsed = self.nav_collapsed;
+        let collapsed = self.nav_collapsed || self.is_compact();
         let mut items: Vec<Element<'_, Message>> = Vec::new();
 
         // Header: brand + collapse toggle (the only control when collapsed).
@@ -7088,5 +7148,21 @@ fn friendly(error: &ApiError) -> String {
             || error.message.clone(),
             |fix| format!("{} ({fix})", error.message),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn width_classes_cover_the_breakpoints() {
+        assert!(compact_width(320.0));
+        assert!(compact_width(639.9));
+        assert!(!compact_width(COMPACT_WIDTH));
+        assert!(!compact_width(900.0));
+        assert!(!wide_width(WIDE_WIDTH - 0.1));
+        assert!(wide_width(WIDE_WIDTH));
+        assert!(wide_width(1600.0));
     }
 }

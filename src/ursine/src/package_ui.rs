@@ -151,6 +151,8 @@ pub struct ListVm<'a> {
 /// way: title on the left; under it description → repository → notes.
 pub struct RowVm<'a> {
     pub title: String,
+    /// Narrow window: stack the action below the text.
+    pub compact: bool,
     pub description: Option<String>,
     pub repository: Option<String>,
     pub notes: Vec<String>,
@@ -438,7 +440,23 @@ pub fn repository_row(
     title: String,
     detail: Option<String>,
     actions: Vec<Element<'_, Message>>,
+    compact: bool,
 ) -> Element<'_, Message> {
+    if compact {
+        let mut lines: Vec<Element<'_, Message>> = vec![selectable_text(title).into()];
+        if let Some(detail) = detail {
+            lines.push(selectable_text(detail).into());
+        }
+        return settings::item(
+            "",
+            column(vec![
+                column(lines).spacing(2).into(),
+                row(actions).spacing(8).into(),
+            ])
+            .spacing(6),
+        )
+        .into();
+    }
     let mut cells: Vec<Element<'_, Message>> = Vec::with_capacity(actions.len() + 1);
     if let Some(detail) = detail {
         cells.push(selectable_text(detail).width(Length::Fill).into());
@@ -466,16 +484,15 @@ fn package_row<'a>(
     title: String,
     description: Element<'a, Message>,
     action: Element<'a, Message>,
+    compact: bool,
 ) -> Element<'a, Message> {
-    row(vec![
-        column(vec![selectable_text(title).into(), description])
-            .spacing(2)
-            .width(Length::Fill)
-            .into(),
-        action,
-    ])
-    .spacing(12)
-    .into()
+    let identity = column(vec![selectable_text(title).into(), description])
+        .spacing(2)
+        .width(Length::Fill);
+    if compact {
+        return column(vec![identity.into(), action]).spacing(6).into();
+    }
+    row(vec![identity.into(), action]).spacing(12).into()
 }
 
 fn row_block(vm: RowVm<'_>) -> Element<'_, Message> {
@@ -497,6 +514,7 @@ fn row_block(vm: RowVm<'_>) -> Element<'_, Message> {
         vm.title,
         column(lines).spacing(2).into(),
         row(vm.actions).spacing(8).into(),
+        vm.compact,
     )
 }
 

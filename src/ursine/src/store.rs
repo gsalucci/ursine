@@ -589,12 +589,12 @@ impl StoreState {
 
     /// The GUI is ONE code path (`package_ui::view`): this adapter only
     /// injects nix data — order and layout never live here.
-    pub fn view(&self, updates_auto: bool) -> Element<'_, Message> {
-        crate::package_ui::view(self.vm(updates_auto))
+    pub fn view(&self, updates_auto: bool, compact: bool) -> Element<'_, Message> {
+        crate::package_ui::view(self.vm(updates_auto, compact))
     }
 
     /// Everything the shared view renders, as data for this manager.
-    pub(crate) fn vm(&self, updates_auto: bool) -> crate::package_ui::PackageVm<'_> {
+    pub(crate) fn vm(&self, updates_auto: bool, compact: bool) -> crate::package_ui::PackageVm<'_> {
         use crate::package_ui::{
             ConfirmVm, ListVm, PackageVm, RefreshVm, RowVm, SearchVm, SectionVm, UpgradeAllVm,
             UpgradeVm,
@@ -858,6 +858,7 @@ impl StoreState {
                 repository.name.clone(),
                 Some(repository.url.clone()),
                 vec![action],
+                compact,
             ));
         }
         repo_items.push(
@@ -935,6 +936,7 @@ impl StoreState {
                 .skip(start)
                 .take(crate::package_ui::PAGE_SIZE)
                 .map(|result| RowVm {
+                    compact,
                     title: match (&result.pname, &result.version) {
                         (Some(name), Some(version)) => format!("{name} {version}"),
                         (Some(name), None) => name.clone(),
@@ -1008,6 +1010,7 @@ impl StoreState {
                             .into(),
                     );
                     RowVm {
+                        compact,
                         // Same `name version` title as apk/flatpak.
                         title: package.version.as_deref().map_or_else(
                             || package.name.clone(),
