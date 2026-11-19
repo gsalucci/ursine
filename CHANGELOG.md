@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.43.0] — 2026-11-19
+
 ### Added
 
 - **Launcher entry for every install channel**: `packaging/org.feralos.Ursine.desktop`
