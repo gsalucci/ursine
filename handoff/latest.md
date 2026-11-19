@@ -6,6 +6,15 @@
 See `state/session-state.json` for current goals, decisions, risks, and next actions.
 See `AGENTS.md` for project context and milestone history.
 
+## Release 0.44.0 — dialog colours, sidebar icons, hidden modules (2026-11-20)
+
+**Status**: tag `v0.44.0` at `ca692e1`, CI `44635552607` green (pin `93a456f`). Host on 0.44.0.
+
+- **Green dialogs root cause**: COSMIC paints every dialog with `primary.component.base`; the theming target mapped `primary` to the shell accent. `primary`/`secondary` are neutral containers again (`mix(bg, fg, 0.10/0.14)`), the accent stays in `accent*`, and a unit test pins both. The stored cosmic theme keeps the old green bases until the user presses **Apply** in Theming.
+- Browser dialog no longer repeats the title (page heading only).
+- Sidebar icons: Disks `drive-harddisk-system-symbolic`, Niri `display-symbolic`, Theming `preferences-appearance-symbolic`, Logs `text-x-generic-symbolic` (all present in the Cosmic theme).
+- Sidebar hides entries whose module is `Off` in Settings or whose capability is missing (`home::module_mode` + `screen_available`); Home keeps the fix hints.
+
 ## Release 0.43.0 — launcher entry (2026-11-19)
 
 **Status**: tag `v0.43.0` at `98b694c`, CI `44586459732` green (pin `0a4e429`). Host on 0.43.0.

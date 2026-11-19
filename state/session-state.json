@@ -1,6 +1,6 @@
 {
   "goal": "Ursine — FeralOS complete control center (Webmin-style): root daemon + libcosmic GUI (v1), full module coverage (v2), OIDC+web (v3, memory-safe stack), Incus UI (v4), ZFS+Pirateus (v5), multi-distro (v6). Intent source of truth: docs/intent/ursine.md.",
-  "status": "v0.43.0 RELEASED (tag 98b694c, CI 44586459732 green, pin 0a4e429). Launcher entry + icon shipped by install.sh and the flake; responsive layout; host on 0.43.0.",
+  "status": "v0.44.0 RELEASED (tag ca692e1, CI 44635552607 green, pin 93a456f). Dialogs neutral (primary container bug), sidebar icons fixed, disabled/unavailable modules hidden; host on 0.44.0.",
   "active_goals": [
     "RELEASE 0.22.0 (2026-10-29): GTK3 chain + eog/galculator targets + minimize toggle + log viewer; gate green; tagged for nix release and VM smoke.",
     "v0.18.4 INIT HARDENING (2026-10-26): PID1/init detection, root-owned daemon/PAM copies, dinit unit idempotency/stale cleanup, install.sh dinit defaults/restart, CI regression coverage. Review-closed; tag pending in this release commit.",
@@ -15,8 +15,8 @@
     "Nix package chain 2026-10-21: `ursine` -> `ursined` -> `ursine-activate`; daemon owns tools/packaging. Profile discovery is generic via SUDO_HOME/SUDO_USER/default. Staged tests and Nix checks green; host service activation pending root."
   ],
   "next_actions": [
-    "User: the launcher now lists Ursine (org.feralos.Ursine.desktop + icon) after a session reload; apk/other packaging picks it up via install.sh --destdir.",
-    "Pending from the user: the green package-list background (screenshot + whether cosmic-settings shows the same) before touching theme colors.",
+    "User: open Theming and press Apply once so the stored cosmic theme drops the green primary (dialogs); restart the GUI for the new sidebar.",
+    "Pending: confirm the dialog/list colours look right after Apply; then close the green-list report.",
     "FeralOS install finding: host has the nixos-26.05 channel but no /etc/nix/registry.json pin; add it from the System scope."
   ],
   "key_decisions": [
@@ -95,7 +95,8 @@
     "2026-11-19 NIX SCOPE UI (user decision): System scope hides the target user (registry only; profile list stays on the signed-in account because root's profile is not readable by a non-root user). User scope offers a dropdown of desktop accounts (uid 1000..60000, /home, real shell) with the plain input until the list loads. Installed title shows the profile owner. Released 0.40.1 and 0.40.2; host on 0.40.2.",
     "2026-11-19 SIDEBAR: collapsible icon rail (64 px collapsed, 240 px expanded) with per-screen symbolic icons and tooltips; brand subtitle + version in the footer. Released as 0.41.0. In-app state only, no config or wire change.",
     "2026-11-19 RESPONSIVE (user decision, full plan): width classes compact<640 / wide>=1080; sidebar auto-collapses in compact, rows stack, dialogs clamp; wide content caps at 1200 px. Pure breakpoint helpers unit-tested; no wire/config change. Released 0.42.0; host upgraded.",
-    "2026-11-19 LAUNCHER ENTRY: one desktop file + icon in packaging/, installed by install.sh under --datadir and carried by the flake GUI package, so every install channel (nix profile, release tarball, future apk/flatpak) shows Ursine in the launcher. Filename matches APP_ID org.feralos.Ursine. Released 0.43.0."
+    "2026-11-19 LAUNCHER ENTRY: one desktop file + icon in packaging/, installed by install.sh under --datadir and carried by the flake GUI package, so every install channel (nix profile, release tarball, future apk/flatpak) shows Ursine in the launcher. Filename matches APP_ID org.feralos.Ursine. Released 0.43.0.",
+    "2026-11-20 THEME MAPPING FIX: COSMIC dialogs use primary.component.base, so primary/secondary must be neutral containers; the shell accent belongs in accent*. Released 0.44.0 together with the sidebar icon fixes and the rule that disabled/capability-missing modules leave the rail."
   ],
   "risks": [
     "v0.18.3 shipped before the Tier 2 review gate; 0.18.4 closes the findings. Never release before review closure again.",
