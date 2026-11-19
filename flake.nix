@@ -47,9 +47,14 @@
       cp -R ${release}/packaging/. $out/packaging/
     '';
 
+    # The GUI package carries its desktop entry and icon so any profile
+    # install shows up in the launcher (XDG_DATA_DIRS includes the profile).
     guiCore = pkgs.runCommand "ursine-core-${bin.version}" {} ''
-      mkdir -p $out/bin
       install -Dm0755 ${release}/bin/ursine $out/bin/ursine
+      install -Dm0644 ${release}/packaging/org.feralos.Ursine.desktop \
+        $out/share/applications/org.feralos.Ursine.desktop
+      install -Dm0644 ${release}/packaging/icons/org.feralos.Ursine.svg \
+        $out/share/icons/hicolor/scalable/apps/org.feralos.Ursine.svg
     '';
 
     # The daemon owns system activation; therefore its package carries the

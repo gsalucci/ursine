@@ -47,6 +47,9 @@ for init in systemd openrc dinit; do
   esac
   test -x "$root/usr/bin/ursine"
   test -x "$root/usr/sbin/ursined"
+  test -f "$root/usr/share/applications/org.feralos.Ursine.desktop"
+  grep -Fq "Exec=ursine" "$root/usr/share/applications/org.feralos.Ursine.desktop"
+  test -f "$root/usr/share/icons/hicolor/scalable/apps/org.feralos.Ursine.svg"
   test "$("$root/usr/sbin/ursined" --version | grep -c 'auth: shadow')" = "1"
 done
 

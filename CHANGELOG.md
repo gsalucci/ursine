@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Launcher entry for every install channel**: `packaging/org.feralos.Ursine.desktop`
+  (name, comment, `Exec=ursine`, `Icon=org.feralos.Ursine`, System/Settings
+  categories) and `packaging/icons/org.feralos.Ursine.svg`. `install.sh`
+  installs them under `--datadir` (`share/applications`,
+  `share/icons/hicolor/scalable/apps`) for release/package installs, and the
+  flake's GUI package carries the same files so a `nix profile install` shows
+  Ursine in the launcher. The installer smoke asserts both files, and the CI
+  tarball contract lists them.
+
 ## [0.42.0] — 2026-11-19
 
 ### Added

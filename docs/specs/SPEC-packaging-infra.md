@@ -13,7 +13,7 @@ Everything that makes Ursine buildable, testable, releasable and packagable — 
   - cargo jobs: `container: alpine:3.22` (FeralOS target branch) + `apk add rust cargo git nodejs` (`nodejs` required so JS actions like checkout run inside the musl container)
   - flake/release jobs: `container: nixos/nix` (git present / `nix-env -iA nixpkgs.git` if missing) — nix itself runs INSIDE the container
 - Local dev mirrors CI exactly: `podman run (or docker) --rm -it -v "$PWD:/work" -w /work rust:alpine …`
-- Packaging: APKBUILDs in `skea999/feralos-aports` (out of this repo). The release tarball ships `install.sh` + `packaging/` (systemd/OpenRC/dinit units) so the same installer works on every Linux distribution; package builds stage it with `--destdir` and an explicit `--init`.
+- Packaging: APKBUILDs in `skea999/feralos-aports` (out of this repo). The release tarball ships `install.sh` + `packaging/` (systemd/OpenRC/dinit units, the `.desktop` entry and its icon) so the same installer works on every Linux distribution; package builds stage it with `--destdir` and an explicit `--init`. The flake's GUI package installs the same two files under `share/applications` and `share/icons/hicolor/scalable/apps`, so a `nix profile install` surfaces Ursine in the launcher through `XDG_DATA_DIRS`.
 
 ## CI workflow (`.github/workflows/ci.yml`)
 
@@ -60,7 +60,9 @@ install.sh                 cross-distro installer: paths, systemd/OpenRC/dinit
 packaging/
 ├─ systemd/ursined.service
 ├─ openrc/ursined
-└─ dinit/                 ursined service + wrapper + /etc/dinit.d/config template
+├─ dinit/                 ursined service + wrapper + /etc/dinit.d/config template
+├─ org.feralos.Ursine.desktop   launcher entry (install.sh + flake: share/applications)
+└─ icons/org.feralos.Ursine.svg launcher icon (hicolor/scalable/apps)
 .dockerignore              artifacts/, target/
 docs/guides/getting-started.md  local build instructions
 docs/guides/installation.md     release install, paths and packaging staging

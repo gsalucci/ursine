@@ -23,6 +23,7 @@ PREFIX=${PREFIX:-/usr/local}
 BINDIR=${BINDIR:-}
 SBINDIR=${SBINDIR:-}
 MANDIR=${MANDIR:-}
+DATADIR=${DATADIR:-}
 LIBEXECDIR=${LIBEXECDIR:-}
 SYSCONFDIR=${SYSCONFDIR:-/etc}
 LOCALSTATEDIR=${LOCALSTATEDIR:-/var}
@@ -63,6 +64,7 @@ OPTIONS
   --bindir DIR          GUI directory (default: PREFIX/bin)
   --sbindir DIR         Daemon directory (default: PREFIX/sbin)
   --libexecdir DIR      Internal helpers (default: PREFIX/lib)
+  --datadir DIR         Data root for the desktop entry + icon (default: PREFIX/share)
   --sysconfdir DIR      Configuration root (default: /etc)
   --localstatedir DIR   Variable data root (default: /var)
   --unitdir DIR         Init service directory (default depends on --init)
@@ -82,8 +84,8 @@ OPTIONS
 
 ENVIRONMENT
   DESTDIR, PREFIX, BINDIR, SBINDIR, LIBEXECDIR, SYSCONFDIR,
-  MANDIR, LOCALSTATEDIR, UNITDIR, DINIT_CONFIG_DIR, BIN_SRC, INIT, START,
-  ALLOW_UNVERIFIED_AUTH.
+  MANDIR, DATADIR, LOCALSTATEDIR, UNITDIR, DINIT_CONFIG_DIR, BIN_SRC, INIT,
+  START, ALLOW_UNVERIFIED_AUTH.
 
 EXAMPLES
   sudo ./install.sh
@@ -118,6 +120,15 @@ while [ "$#" -gt 0 ]; do
     ;;
   --bindir=*)
     BINDIR=${1#*=}
+    shift
+    ;;
+  --datadir)
+    need_value "$@"
+    DATADIR=$2
+    shift 2
+    ;;
+  --datadir=*)
+    DATADIR=${1#*=}
     shift
     ;;
   --sbindir)
@@ -253,6 +264,7 @@ LOCALSTATEDIR=$(trim_trailing_slash "$LOCALSTATEDIR")
 [ -n "$SBINDIR" ] || SBINDIR="$PREFIX/sbin"
 [ -n "$LIBEXECDIR" ] || LIBEXECDIR="$PREFIX/lib"
 [ -n "$MANDIR" ] || MANDIR="$PREFIX/share/man"
+[ -n "$DATADIR" ] || DATADIR="$PREFIX/share"
 [ -n "$DINIT_CONFIG_DIR" ] || DINIT_CONFIG_DIR="$SYSCONFDIR/dinit.d/config"
 
 validate_path() {
@@ -275,7 +287,7 @@ validate_path() {
 }
 
 for path in "$PREFIX" "$BINDIR" "$SBINDIR" "$LIBEXECDIR" "$SYSCONFDIR" \
-  "$LOCALSTATEDIR" "$DINIT_CONFIG_DIR" "$MANDIR"; do
+  "$LOCALSTATEDIR" "$DINIT_CONFIG_DIR" "$MANDIR" "$DATADIR"; do
   validate_path "$path"
 done
 [ -z "$UNITDIR" ] || validate_path "$UNITDIR"
@@ -637,6 +649,23 @@ install_file "$BIN_SRC/ursine" "$(target_path "$BINDIR/ursine")" 0755
 info "installed: $(target_path "$BINDIR/ursine")"
 install_file "$BIN_SRC/ursined" "$(target_path "$SBINDIR/ursined")" 0755
 info "installed: $(target_path "$SBINDIR/ursined")"
+
+# Desktop entry + icon: shipped by every install channel (release tree under
+# a package manager, nix store copy) so the launcher lists Ursine.
+if asset_dir=$(find_asset_dir); then
+  if [ -f "$asset_dir/org.feralos.Ursine.desktop" ]; then
+    ensure_dir "$(target_path "$DATADIR/applications")" 0755
+    install_file "$asset_dir/org.feralos.Ursine.desktop" \
+      "$(target_path "$DATADIR/applications/org.feralos.Ursine.desktop")" 0644
+    info "installed: $(target_path "$DATADIR/applications/org.feralos.Ursine.desktop")"
+  fi
+  if [ -f "$asset_dir/icons/org.feralos.Ursine.svg" ]; then
+    ensure_dir "$(target_path "$DATADIR/icons/hicolor/scalable/apps")" 0755
+    install_file "$asset_dir/icons/org.feralos.Ursine.svg" \
+      "$(target_path "$DATADIR/icons/hicolor/scalable/apps/org.feralos.Ursine.svg")" 0644
+    info "installed: $(target_path "$DATADIR/icons/hicolor/scalable/apps/org.feralos.Ursine.svg")"
+  fi
+fi
 
 if [ -z "$DESTDIR" ]; then
   chown root:root "$(target_path "$LOG_DIR")" || die "cannot set ownership on $LOG_DIR"
