@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Collapsible sidebar with icons** (software-center rail): every screen has
+  a symbolic icon, the header toggle collapses the rail to 64 px of icons
+  (tooltips name each one), the header carries the FeralOS subtitle, and the
+  footer shows the signed-in user plus the version. The expanded rail keeps
+  the full labels and the two-line brand.
+
 ## [0.40.2] — 2026-11-19
 
 ### Fixed

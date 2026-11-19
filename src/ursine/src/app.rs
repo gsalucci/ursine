@@ -152,6 +152,8 @@ pub struct App {
     booster: BoosterState,
     apparmor: ApparmorState,
     screen: Screen,
+    /// Sidebar collapsed to icons only (modern software-center rail).
+    nav_collapsed: bool,
     session: Option<Session>,
     /// Bumped on sign-in/sign-out so late async results cannot repopulate a
     /// different session's screens.
@@ -382,6 +384,7 @@ pub enum Message {
     PackageFlatpakSearchLoaded(u64, Result<Vec<FlatpakPackage>, ApiError>),
     PackageActionFinished(u64, String, Result<serde_json::Value, ApiError>),
     BackHome,
+    ToggleSidebar,
     SnapshotsLoaded(u64, Result<Box<client::SnapshotPage>, ApiError>),
     RefreshSnapshots,
     SnapshotSectionChanged(String),
@@ -692,6 +695,7 @@ impl cosmic::Application for App {
             booster: BoosterState::default(),
             apparmor: ApparmorState::default(),
             screen: Screen::Home,
+            nav_collapsed: false,
             session: None,
             epoch: 0,
             job: None,
@@ -1918,6 +1922,7 @@ impl cosmic::Application for App {
                 return self.finish_niri_validate(epoch, result)
             }
             Message::BackHome => self.screen = Screen::Home,
+            Message::ToggleSidebar => self.nav_collapsed = !self.nav_collapsed,
             Message::StoreLoaded(epoch, scope, result) => {
                 return self.finish_store(epoch, scope, result)
             }
@@ -3853,55 +3858,139 @@ impl App {
     }
 
     fn sidebar(&self) -> Element<'_, Message> {
-        use cosmic::widget::{button, column, container, scrollable, text};
+        use cosmic::iced::Length;
+        use cosmic::widget::{button, column, container, icon, row, scrollable, text, tooltip};
 
-        let entries: [(Screen, &str); 18] = [
-            (Screen::Home, "Overview"),
-            (Screen::Packages, "Package manager"),
-            (Screen::Printers, "Printers"),
-            (Screen::Scanners, "Scanners"),
-            (Screen::Firewall, "Firewall"),
-            (Screen::Services, "Services"),
-            (Screen::Disks, "Disks"),
-            (Screen::Bluetooth, "Bluetooth"),
-            (Screen::Network, "Network"),
-            (Screen::Snapshots, "Snapshots"),
-            (Screen::Users, "Users"),
-            (Screen::Niri, "Niri desktop"),
-            (Screen::Theming, "Theming"),
-            (Screen::Logs, "Logs"),
-            (Screen::Crontab, "Crontab"),
-            (Screen::Booster, "Booster"),
-            (Screen::Apparmor, "AppArmor"),
-            (Screen::Settings, "Settings"),
+        let entries: [(Screen, &str, &str); 18] = [
+            (Screen::Home, "Overview", "go-home-symbolic"),
+            (
+                Screen::Packages,
+                "Package manager",
+                "system-software-install-symbolic",
+            ),
+            (Screen::Printers, "Printers", "printer-symbolic"),
+            (Screen::Scanners, "Scanners", "scanner-symbolic"),
+            (Screen::Firewall, "Firewall", "security-high-symbolic"),
+            (Screen::Services, "Services", "preferences-system-symbolic"),
+            (Screen::Disks, "Disks", "drive-harddisk-symbolic"),
+            (Screen::Bluetooth, "Bluetooth", "bluetooth-symbolic"),
+            (Screen::Network, "Network", "network-wireless-symbolic"),
+            (Screen::Snapshots, "Snapshots", "document-save-symbolic"),
+            (Screen::Users, "Users", "system-users-symbolic"),
+            (
+                Screen::Niri,
+                "Niri desktop",
+                "preferences-desktop-display-symbolic",
+            ),
+            (
+                Screen::Theming,
+                "Theming",
+                "preferences-desktop-theme-symbolic",
+            ),
+            (Screen::Logs, "Logs", "text-x-generic-symbolic"),
+            (Screen::Crontab, "Crontab", "appointment-new-symbolic"),
+            (Screen::Booster, "Booster", "system-reboot-symbolic"),
+            (Screen::Apparmor, "AppArmor", "security-medium-symbolic"),
+            (Screen::Settings, "Settings", "emblem-system-symbolic"),
         ];
-        let mut items: Vec<Element<'_, Message>> = vec![
-            text::title3("Ursine").into(),
-            text(format!("signed in as {}", self.home.user)).into(),
-            text("").height(Length::Fixed(12.0)).into(),
-        ];
-        for (screen, title) in entries {
+
+        let collapsed = self.nav_collapsed;
+        let mut items: Vec<Element<'_, Message>> = Vec::new();
+
+        // Header: brand + collapse toggle (the only control when collapsed).
+        let toggle_icon = if collapsed {
+            "go-next-symbolic"
+        } else {
+            "go-previous-symbolic"
+        };
+        let toggle = button::custom(icon::from_name(toggle_icon).size(16))
+            .padding(6)
+            .on_press(Message::ToggleSidebar);
+        if collapsed {
+            items.push(container(toggle).center_x(Length::Fill).into());
+        } else {
+            items.push(
+                row(vec![
+                    column(vec![
+                        text::title4("Ursine").into(),
+                        text::caption("FeralOS control center").into(),
+                    ])
+                    .spacing(2)
+                    .into(),
+                    text("").width(Length::Fill).into(),
+                    toggle.into(),
+                ])
+                .align_y(cosmic::iced::Alignment::Center)
+                .into(),
+            );
+        }
+        items.push(text("").height(Length::Fixed(8.0)).into());
+
+        for (screen, title, icon_name) in entries {
             let selected = self.screen == screen;
             let available = self.screen_available(screen);
-            let mut entry = if selected {
-                button::suggested(title)
+            let glyph = icon::from_name(icon_name).size(if collapsed { 18 } else { 16 });
+            let content: Element<'_, Message> = if collapsed {
+                glyph.into()
             } else {
-                button::text(title)
-            }
-            .width(Length::Fill);
-            if !selected && available {
+                row(vec![glyph.into(), text(title).into()])
+                    .spacing(10)
+                    .align_y(cosmic::iced::Alignment::Center)
+                    .into()
+            };
+            let mut entry = button::custom(content)
+                .width(Length::Fill)
+                .padding([6, 8])
+                .selected(selected);
+            if available && !selected {
                 entry = entry.on_press(Self::navigate(screen));
             }
-            items.push(entry.into());
+            // Icon-only rows must still say what they are.
+            let entry: Element<'_, Message> = if collapsed {
+                tooltip(entry, text(title), tooltip::Position::Right).into()
+            } else {
+                entry.into()
+            };
+            items.push(entry);
         }
+
         items.push(text("").height(Length::Fill).into());
-        items.push(button::text("Sign out").on_press(Message::SignOut).into());
+        if collapsed {
+            items.push(
+                container(
+                    button::custom(icon::from_name("system-log-out-symbolic").size(18))
+                        .padding(6)
+                        .on_press(Message::SignOut),
+                )
+                .center_x(Length::Fill)
+                .into(),
+            );
+        } else {
+            items.push(text::caption(format!("Signed in as {}", self.home.user)).into());
+            items.push(text::caption(format!("Ursine v{}", env!("CARGO_PKG_VERSION"))).into());
+            items.push(
+                button::custom(
+                    row(vec![
+                        icon::from_name("system-log-out-symbolic").size(16).into(),
+                        text("Sign out").into(),
+                    ])
+                    .spacing(10)
+                    .align_y(cosmic::iced::Alignment::Center),
+                )
+                .width(Length::Fill)
+                .padding([6, 8])
+                .on_press(Message::SignOut)
+                .into(),
+            );
+        }
+
         let panel = column(items)
-            .spacing(4)
-            .padding(16)
-            .width(Length::Fixed(240.0));
+            .spacing(2)
+            .padding(if collapsed { 8 } else { 16 })
+            .width(Length::Fill);
         container(scrollable(panel))
             .class(cosmic::theme::Container::Background)
+            .width(Length::Fixed(if collapsed { 64.0 } else { 240.0 }))
             .height(Length::Fill)
             .into()
     }
