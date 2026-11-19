@@ -64,6 +64,13 @@ The installer:
 - creates `/etc/ursine` and `/var/log/ursine` (mode `0750`);
 - enables and starts the daemon unless `--no-start` is passed.
 
+The installer also writes the launcher entry
+`DATADIR/applications/org.feralos.Ursine.desktop` and its icon
+(`DATADIR/icons/hicolor/scalable/apps/org.feralos.Ursine.svg`; `DATADIR`
+defaults to `PREFIX/share`, override with `--datadir`). The flake's GUI
+package carries the same two files, so a `nix profile install` lists
+Ursine in the launcher too.
+
 Use `--check` first to print the resolved paths and unit without changing
 anything:
 

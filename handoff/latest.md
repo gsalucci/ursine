@@ -6,6 +6,16 @@
 See `state/session-state.json` for current goals, decisions, risks, and next actions.
 See `AGENTS.md` for project context and milestone history.
 
+## Release 0.43.0 — launcher entry (2026-11-19)
+
+**Status**: tag `v0.43.0` at `98b694c`, CI `44586459732` green (pin `0a4e429`). Host on 0.43.0.
+
+- `packaging/org.feralos.Ursine.desktop` + `packaging/icons/org.feralos.Ursine.svg` (bear mark, dark tile + green).
+- `install.sh --datadir` (default `PREFIX/share`) installs them under `applications/` and `icons/hicolor/scalable/apps/`, for release tarballs and any package-manager staging.
+- Flake GUI package (`guiCore`) carries the same files, so `nix profile install` surfaces the launcher entry through `XDG_DATA_DIRS`.
+- Installer smoke asserts both files for systemd/OpenRC/dinit staging; the CI tarball contract lists them; nix lint/eval green.
+- **Host verified**: `~/.nix-profile/share/applications/org.feralos.Ursine.desktop` → `ursine-0.43.0`, icon present, path already in `XDG_DATA_DIRS`.
+
 ## Release 0.42.0 — responsive layout (2026-11-19)
 
 **Status**: tag `v0.42.0` at `8255b1b`, CI `44566281029` green (publish + pin `2aeb573`). Host on 0.42.0.
