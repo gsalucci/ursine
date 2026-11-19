@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.40.1] — 2026-11-19
+
 ### Changed
 
 - **Nix scope drives the user choice**: the target user is a dropdown of
