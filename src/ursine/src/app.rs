@@ -156,6 +156,8 @@ pub struct App {
     nav_collapsed: bool,
     /// Last window width in logical pixels (responsive breakpoints).
     window_width: f32,
+    /// Password focus still to be confirmed once the widget tree exists.
+    login_focus_pending: bool,
     session: Option<Session>,
     /// Bumped on sign-in/sign-out so late async results cannot repopulate a
     /// different session's screens.
@@ -170,6 +172,7 @@ pub enum Message {
     PasswordChanged(String),
     SignIn,
     SignInResult(Result<AuthSession, ApiError>),
+    WindowEvent(cosmic::iced::window::Id, cosmic::iced::window::Event),
     CapabilitiesLoaded(u64, Result<Vec<CapabilityReport>, ApiError>),
     RefreshCapabilities,
     StatusLoaded(u64, Result<client::SystemStatus, ApiError>),
@@ -699,6 +702,7 @@ impl cosmic::Application for App {
             screen: Screen::Home,
             nav_collapsed: false,
             window_width: 1200.0,
+            login_focus_pending: true,
             session: None,
             epoch: 0,
             job: None,
@@ -2087,10 +2091,29 @@ impl cosmic::Application for App {
             Message::SignOut => {
                 self.sign_out();
                 // Back on the login screen: focus the password again.
+                self.login_focus_pending = true;
                 return cosmic::widget::text_input::focus::<Message>(
                     self.login.password_id.clone(),
                 )
                 .map(cosmic::Action::App);
+            }
+            Message::WindowEvent(_id, event) => {
+                // `init` cannot focus a widget before the first layout: retry
+                // on the first real window event so the cursor is already in
+                // the password field when Ursine opens.
+                let ready = matches!(
+                    event,
+                    cosmic::iced::window::Event::Opened { .. }
+                        | cosmic::iced::window::Event::Resized(_)
+                        | cosmic::iced::window::Event::Focused
+                );
+                if ready && self.session.is_none() && self.login_focus_pending {
+                    self.login_focus_pending = false;
+                    return cosmic::widget::text_input::focus::<Message>(
+                        self.login.password_id.clone(),
+                    )
+                    .map(cosmic::Action::App);
+                }
             }
         }
         Task::none()
@@ -2098,6 +2121,11 @@ impl cosmic::Application for App {
 
     fn subscription(&self) -> cosmic::iced::Subscription<Message> {
         let mut subscriptions = Vec::new();
+        if self.session.is_none() && self.login_focus_pending {
+            subscriptions.push(
+                cosmic::iced::window::events().map(|(id, event)| Message::WindowEvent(id, event)),
+            );
+        }
         if self.store.action_busy {
             subscriptions.push(
                 cosmic::iced::time::every(std::time::Duration::from_secs(1))

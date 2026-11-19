@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Password field focused on open**: the initial `text_input::focus` ran
+  before the first layout, so the cursor was not in the password box. The
+  window's first `Opened`/`Resized`/`Focused` event now retries it (one-shot,
+  armed again on sign-out), so Ursine opens ready to type the password.
+
 ## [0.44.0] — 2026-11-20
 
 ### Fixed
