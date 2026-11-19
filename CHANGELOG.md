@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.44.0] — 2026-11-20
+
 ### Fixed
 
 - **Dialogs are neutral, not accent-green**: COSMIC paints every dialog with
