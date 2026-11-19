@@ -496,6 +496,8 @@ pub enum Message {
     StoreRepoNameChanged(String),
     StoreRepoUrlChanged(String),
     StoreScopeChanged(usize),
+    StoreUserPicked(usize),
+    StoreUsersLoaded(u64, Result<Vec<String>, ApiError>),
     StoreRepoAdd,
     StoreRepoRemoveRequested(String, bool, ursine_api::NixRepoSource),
     StoreRepoRemoveConfirmed,
@@ -1959,6 +1961,22 @@ impl cosmic::Application for App {
                     self.store.system = system;
                     self.store.pending_repo_remove = None;
                     return self.load_store();
+                }
+            }
+            Message::StoreUserPicked(index) => {
+                let Some(user) = self.store.users.get(index).cloned() else {
+                    return Task::none();
+                };
+                if user != self.store.as_user_input.trim() {
+                    self.store.set_target_user(user);
+                    return self.load_store();
+                }
+            }
+            Message::StoreUsersLoaded(epoch, result) => {
+                if epoch == self.epoch {
+                    if let Ok(users) = result {
+                        self.store.users = users;
+                    }
                 }
             }
             Message::StoreRepoRemoveRequested(name, system, source) => {
@@ -6256,6 +6274,15 @@ impl App {
         })
         .map(cosmic::Action::App);
         let mut tasks = vec![snapshot, repos];
+        if self.store.users.is_empty() {
+            let users_token = session.token.clone();
+            tasks.push(
+                Task::future(async move {
+                    Message::StoreUsersLoaded(epoch, client::login_users(users_token).await)
+                })
+                .map(cosmic::Action::App),
+            );
+        }
         let auto_nix = self
             .settings
             .config

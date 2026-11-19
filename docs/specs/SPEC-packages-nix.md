@@ -52,6 +52,7 @@ ANSI escapes and has no `(current)` marker; `--delete-generations +N` needs root
 - Registry list/add/remove are user-scoped actions: `asUser` picks the registry to read or edit. A NON-root caller may target only its own account; root may retarget an existing normal-login account. Every authenticated Ursine user is in `wheel` (login gate), which is the distro's trusted-users boundary.
   Both mutations rotate the registry JSON first (uniform `.ursine-backup[.N]` slots, `backup_configs.copies`; chowned back to the user).
 - `asUser` defaults to the authenticated principal; daemon verifies target user exists and is a normal user (uid >= 1000) before exec
+- GUI: the `System | User` scope drives repositories; the `User` scope offers a dropdown of normal login accounts (plain input until the list loads) and the installed list names the profile owner. The `System` scope hides the user choice — the system registry belongs to root, while the profile list stays on the signed-in account because a non-root user cannot read root's profile.
 - Long ops (install/upgrade) run as daemon jobs: exact output streams to `/run/ursine/jobs/<id>.log` and frontends poll `job_output` (supersedes the earlier same-connection JSON progress-event design; see Package progress)
 
 ## Commands

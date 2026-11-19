@@ -1368,6 +1368,22 @@ mod tests {
     }
 }
 
+/// Normal login accounts (uid >= 1000) for the target-user dropdown.
+pub async fn login_users(token: SessionToken) -> Result<Vec<String>, ApiError> {
+    let value = call(token, ModuleId::Users, Action::ListUsers, None).await?;
+    let users = value
+        .get("users")
+        .cloned()
+        .ok_or_else(|| ApiError::internal("daemon users response has no list"))?;
+    let users: Vec<UserSummary> = serde_json::from_value(users)
+        .map_err(|e| ApiError::internal(format!("cannot read users: {e}")))?;
+    Ok(users
+        .into_iter()
+        .filter(|user| user.uid >= 1000)
+        .map(|user| user.name)
+        .collect())
+}
+
 /// Users and system groups in one refresh.
 #[derive(Debug, Clone, Default)]
 pub struct UsersPage {

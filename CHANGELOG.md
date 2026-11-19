@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Nix scope drives the user choice**: the target user is a dropdown of
+  normal login accounts (the plain input stays until the list loads), and the
+  `System` scope hides it — the system registry has no target while the
+  installed list stays on the signed-in account (root's profile is not
+  readable by a non-root user). The installed list names its profile owner
+  (`Installed (n) — <user>`), and the screen opens on the user scope.
+
 ## [0.40.0] — 2026-11-18
 
 ### Changed

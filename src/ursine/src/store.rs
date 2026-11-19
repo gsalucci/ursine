@@ -339,6 +339,8 @@ pub struct StoreState {
     /// Repository scope: `true` = system registry + root channels,
     /// `false` = the target user's.
     pub system: bool,
+    /// Normal login accounts offered by the target-user dropdown.
+    pub users: Vec<String>,
     /// Add-repository form inputs.
     pub repo_name: String,
     pub repo_url: String,
@@ -399,7 +401,10 @@ impl Default for StoreState {
             search_query: String::new(),
             search_repo: "nixpkgs".to_string(),
             repositories: Vec::new(),
-            system: true,
+            // The desktop user opens on their own registry; System is one
+            // click away and never offers a user choice.
+            system: false,
+            users: Vec::new(),
             repo_name: String::new(),
             repo_url: String::new(),
             pending_repo_remove: None,
@@ -459,8 +464,20 @@ impl StoreState {
 
     /// `None` means the principal's own profile; the daemon resolves it.
     pub fn target_user(&self) -> Option<String> {
+        // The system scope has no user target: repositories and channels
+        // belong to root, and the profile list stays on the signed-in
+        // account (a non-root user cannot read root's profile).
+        if self.system {
+            return None;
+        }
         let user = self.as_user_input.trim();
         (!user.is_empty()).then(|| user.to_string())
+    }
+
+    /// Whose profile the installed list shows right now.
+    pub fn profile_user(&self) -> String {
+        self.target_user()
+            .unwrap_or_else(|| self.as_user_input.trim().to_string())
     }
 
     pub fn current_scope(&self) -> StoreScope {
@@ -635,7 +652,8 @@ impl StoreState {
 
         // --- Scope ---
         // Same control as the flatpak screen: the dropdown picks the
-        // installation, the target user picks whose profile it acts on.
+        // installation. The user choice only exists for the user scope —
+        // the system registry belongs to root and has no target.
         let installation = dropdown(
             vec!["System", "User"],
             Some(usize::from(!self.system)),
@@ -644,12 +662,28 @@ impl StoreState {
         let mut scope_items: Vec<Element<'_, Message>> = vec![
             settings::item("Installation", installation).into(),
             settings::item(
-                "Target user",
-                text_input("Signed-in user", self.as_user_input.clone())
-                    .on_input(Message::StoreAsUserChanged),
+                "Profile",
+                text(self.profile_user()).width(cosmic::iced::Length::Fill),
             )
             .into(),
         ];
+        if !self.system {
+            let target: Element<'_, Message> = if self.users.is_empty() {
+                // The list arrives with the first load: keep the plain
+                // input usable instead of blocking the screen.
+                text_input("Signed-in user", self.as_user_input.clone())
+                    .on_input(Message::StoreAsUserChanged)
+                    .into()
+            } else {
+                let selected = self
+                    .users
+                    .iter()
+                    .position(|user| user == self.as_user_input.trim())
+                    .unwrap_or(0);
+                dropdown(self.users.clone(), Some(selected), Message::StoreUserPicked).into()
+            };
+            scope_items.push(settings::item("Target user", target).into());
+        }
         if self.needs_load() {
             scope_items.push(
                 settings::item(
@@ -1034,7 +1068,7 @@ impl StoreState {
                     format!("Search results ({listed})")
                 }
             } else {
-                format!("Installed ({listed})")
+                format!("Installed ({listed}) — {}", self.profile_user())
             },
             status,
             empty_note,
