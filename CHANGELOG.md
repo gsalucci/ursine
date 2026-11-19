@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.42.0] — 2026-11-19
+
 ### Added
 
 - **Responsive layout**: the window width drives three classes — compact
