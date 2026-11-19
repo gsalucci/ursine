@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.41.0] — 2026-11-19
+
 ### Added
 
 - **Collapsible sidebar with icons** (software-center rail): every screen has
