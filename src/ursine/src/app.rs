@@ -3932,20 +3932,16 @@ impl App {
             (Screen::Scanners, "Scanners", "scanner-symbolic"),
             (Screen::Firewall, "Firewall", "security-high-symbolic"),
             (Screen::Services, "Services", "preferences-system-symbolic"),
-            (Screen::Disks, "Disks", "drive-harddisk-symbolic"),
+            (Screen::Disks, "Disks", "drive-harddisk-system-symbolic"),
             (Screen::Bluetooth, "Bluetooth", "bluetooth-symbolic"),
             (Screen::Network, "Network", "network-wireless-symbolic"),
             (Screen::Snapshots, "Snapshots", "document-save-symbolic"),
             (Screen::Users, "Users", "system-users-symbolic"),
-            (
-                Screen::Niri,
-                "Niri desktop",
-                "preferences-desktop-display-symbolic",
-            ),
+            (Screen::Niri, "Niri desktop", "display-symbolic"),
             (
                 Screen::Theming,
                 "Theming",
-                "preferences-desktop-theme-symbolic",
+                "preferences-appearance-symbolic",
             ),
             (Screen::Logs, "Logs", "text-x-generic-symbolic"),
             (Screen::Crontab, "Crontab", "appointment-new-symbolic"),
@@ -3987,6 +3983,9 @@ impl App {
         items.push(text("").height(Length::Fixed(8.0)).into());
 
         for (screen, title, icon_name) in entries {
+            if self.screen_hidden(screen) {
+                continue;
+            }
             let selected = self.screen == screen;
             let available = self.screen_available(screen);
             let glyph = icon::from_name(icon_name).size(if collapsed { 18 } else { 16 });
@@ -4084,6 +4083,46 @@ impl App {
             .iter()
             .find(|report| report.capability == capability)
             .is_some_and(|report| report.available)
+    }
+
+    /// Module switches from the last config snapshot (`None` = not loaded).
+    fn module_off(&self, module: ModuleId) -> bool {
+        let Some(config) = self.settings.config.as_ref() else {
+            return false;
+        };
+        crate::home::module_mode(&config.modules, module) == TriState::Off
+    }
+
+    /// Sidebar visibility: a module switched off in Settings, or one whose
+    /// capability is missing, leaves the rail. The Home screen still lists
+    /// every module with its install hint.
+    fn screen_hidden(&self, screen: Screen) -> bool {
+        if !self.screen_available(screen) {
+            return true;
+        }
+        match screen {
+            Screen::Home | Screen::Settings => false,
+            Screen::Packages => {
+                self.module_off(ModuleId::PackagesNix)
+                    && self.module_off(ModuleId::PackagesApk)
+                    && self.module_off(ModuleId::PackagesFlatpak)
+            }
+            Screen::Printers => self.module_off(ModuleId::Printers),
+            Screen::Scanners => self.module_off(ModuleId::Scanners),
+            Screen::Firewall => self.module_off(ModuleId::Firewall),
+            Screen::Services => self.module_off(ModuleId::Services),
+            Screen::Disks => self.module_off(ModuleId::Disks),
+            Screen::Bluetooth => self.module_off(ModuleId::Bluetooth),
+            Screen::Network => self.module_off(ModuleId::Network),
+            Screen::Snapshots => self.module_off(ModuleId::Snapshots),
+            Screen::Users => self.module_off(ModuleId::Users),
+            Screen::Niri => self.module_off(ModuleId::Niri),
+            Screen::Theming => self.module_off(ModuleId::Theming),
+            Screen::Logs => self.module_off(ModuleId::Logs),
+            Screen::Crontab => self.module_off(ModuleId::Crontab),
+            Screen::Booster => self.module_off(ModuleId::Booster),
+            Screen::Apparmor => self.module_off(ModuleId::Apparmor),
+        }
     }
 
     fn screen_available(&self, screen: Screen) -> bool {

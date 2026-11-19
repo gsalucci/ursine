@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Dialogs are neutral, not accent-green**: COSMIC paints every dialog with
+  `primary.component.base`; the theming target mapped `primary` to the shell
+  accent, so package dialogs rendered as a solid green block. `primary` and
+  `secondary` are neutral containers again, and the accent stays in
+  `accent*`. The browser dialog no longer repeats its title, and the missing
+  sidebar icons (Disks, Niri, Theming, Logs) use names present in the Cosmic
+  icon theme.
+- **Disabled modules leave the sidebar**: an entry is hidden when its module
+  is switched off in Settings or its capability is missing; the Home screen
+  keeps the install hints.
+
 ## [0.43.0] — 2026-11-19
 
 ### Added

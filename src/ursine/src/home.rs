@@ -298,7 +298,8 @@ impl HomeState {
     }
 }
 
-fn module_mode(modules: &ModulesConfig, module: ModuleId) -> TriState {
+#[allow(clippy::redundant_pub_crate)] // private module: pub(crate) is the real visibility
+pub(crate) fn module_mode(modules: &ModulesConfig, module: ModuleId) -> TriState {
     match module {
         ModuleId::PackagesNix => modules.packages_nix,
         ModuleId::PackagesApk => modules.packages_apk,

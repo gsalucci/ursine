@@ -159,13 +159,16 @@ fn patched(template: &Theme, snap: &ThemeSnapshot) -> Result<Theme, ApiError> {
     set(&mut value, "control_tint", Value::Null);
     set(&mut value, "text_tint", Value::Null);
 
+    // `primary`/`secondary` are neutral *containers* (dialogs, cards), not
+    // the accent: libcosmic paints every dialog with `primary.component.base`,
+    // so mapping the shell accent there turns dialogs into a solid accent
+    // block. The accent lives in the `accent*` slots below.
+    let primary_base = mix(bg, fg, 0.10);
+    let secondary_base = mix(bg, fg, 0.14);
     let opaque = [
         ("background", container(bg, fg)),
-        ("primary", container(primary, &contrast_on(primary))),
-        (
-            "secondary",
-            container(&colors.secondary, &contrast_on(&colors.secondary)),
-        ),
+        ("primary", container(&primary_base, fg)),
+        ("secondary", container(&secondary_base, fg)),
     ];
     for (key, built) in opaque {
         set(&mut value, key, built.clone());
@@ -207,6 +210,9 @@ fn patched(template: &Theme, snap: &ThemeSnapshot) -> Result<Theme, ApiError> {
     palette.insert("name".into(), json!(palette_name));
     palette.insert("gray_1".into(), json!(colors.surface.clone()));
     palette.insert("gray_2".into(), json!(mix(&colors.surface, fg, 0.15)));
+    // The shell's secondary survives as a palette accent, never as a
+    // container base (dialogs must stay neutral).
+    palette.insert("accent_blue".into(), json!(colors.secondary.clone()));
     palette.insert("bright_red".into(), json!(colors.error.clone()));
     palette.insert("bright_green".into(), json!(colors.success.clone()));
     palette.insert("bright_orange".into(), json!(colors.warning.clone()));
@@ -363,6 +369,10 @@ mod tests {
         assert_eq!(hex(&value["accent"]["base"]), "#4caf50ff");
         // Opaque container carries the snapshot background.
         assert_eq!(hex(&value["background"]["base"]), "#10140fff");
+        // Dialogs use `primary`: it must stay a neutral surface, never the
+        // accent (a green dialog was the 0.43 bug).
+        assert_ne!(hex(&value["primary"]["base"]), "#4caf50ff");
+        assert_eq!(hex(&value["accent"]["base"]), "#4caf50ff");
         assert_eq!(hex(&value["background"]["on"]), "#e0e4dbff");
         // Transparent variant keeps an alpha suffix for frosted surfaces.
         let transparent = value["transparent_background"]["base"].as_str().unwrap();

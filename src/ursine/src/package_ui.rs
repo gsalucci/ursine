@@ -518,8 +518,11 @@ fn row_block(vm: RowVm<'_>) -> Element<'_, Message> {
     )
 }
 
-fn list_section(list: ListVm<'_>) -> Element<'_, Message> {
-    let mut section = settings::section().title(list.title);
+fn list_section(list: ListVm<'_>, show_title: bool) -> Element<'_, Message> {
+    let mut section = settings::section();
+    if show_title {
+        section = section.title(list.title);
+    }
     if let Some(filter) = &list.filter {
         section = section.add(settings::item(
             "Filter",
@@ -718,7 +721,7 @@ pub fn progress_dialog(title: String, content: Element<'_, Message>) -> Element<
 /// The installed/search list as a half-page browser dialog.
 pub fn list_dialog(list: ListVm<'_>, close: Message) -> Element<'_, Message> {
     let title = list.title.clone();
-    browser_dialog(title, list_section(list), close)
+    browser_dialog(title, list_section(list, false), close)
 }
 
 /// The nix generations as a half-page browser dialog.
