@@ -6,6 +6,16 @@
 See `state/session-state.json` for current goals, decisions, risks, and next actions.
 See `AGENTS.md` for project context and milestone history.
 
+## Release 0.42.0 — responsive layout (2026-11-19)
+
+**Status**: tag `v0.42.0` at `8255b1b`, CI `44566281029` green (publish + pin `2aeb573`). Host on 0.42.0.
+
+- Width classes via `Application::on_window_resize` → `window_width`: compact `< 640`, wide `>= 1080`; pure helpers `compact_width`/`wide_width` unit-tested.
+- Compact: sidebar forced icon-only, package/repository rows stack actions under the text, content padding 8, dialogs `min(720, width - 32)`.
+- Wide: content capped at 1200 px; medium keeps the manual sidebar toggle.
+- Threaded `compact` through `store::vm`/`packages::vm` and `package_ui` row builders (`RowVm.compact`); no wire/config change.
+- Still open: the green package-list background — waiting on the user's screenshot and whether cosmic-settings shows the same.
+
 ## Release 0.41.0 — collapsible icon sidebar (2026-11-19)
 
 **Status**: tag `v0.41.0` at `75d1aa3`, CI `44539840596` green (`verify` published `draft=false`, `nix` pinned `a6bb188`). Host on 0.41.0.
