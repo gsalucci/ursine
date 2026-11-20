@@ -339,7 +339,7 @@ pub fn render_template(caps: &[CapabilityReport]) -> String {
 
     out.push_str("[updates]\n");
     out.push_str("# check for package updates when a manager screen opens\n");
-    out.push_str("# (nix re-fetches flakes: default off, check on demand)\n");
+    out.push_str("# (nix: parallel lock check, default on)\n");
     out.push_str("apk = true\n");
     out.push_str("flatpak = true\n");
     out.push_str("nix = false\n\n");

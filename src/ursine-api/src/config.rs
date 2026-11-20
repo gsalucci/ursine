@@ -75,7 +75,8 @@ pub struct UpdatesAuto {
     pub apk: bool,
     /// Check on screen open (flatpak is fast — default on).
     pub flatpak: bool,
-    /// Check on screen open (nix re-fetches flakes — default OFF).
+    /// Check on screen open (nix now checks in ~1 s: parallel metadata +
+    /// `git ls-remote` for github refs — default on).
     pub nix: bool,
 }
 
@@ -84,7 +85,7 @@ impl Default for UpdatesAuto {
         Self {
             apk: true,
             flatpak: true,
-            nix: false,
+            nix: true,
         }
     }
 }

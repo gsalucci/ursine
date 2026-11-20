@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Nix update check on by default**: with the parallel + `git ls-remote`
+  path the check costs ~1 s, so "Check updates automatically" now defaults on
+  for all three managers. An explicit `[updates] nix = false` in
+  `/etc/ursine/config.toml` still wins.
+
 ## [0.46.0] — 2026-11-20
 
 ### Changed
