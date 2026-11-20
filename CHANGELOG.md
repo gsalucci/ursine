@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.48.0] — 2026-11-20
+
 ### Changed
 
 - **Package search opens its own window**: typing a query and pressing Search
