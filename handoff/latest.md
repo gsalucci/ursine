@@ -6,6 +6,14 @@
 See `state/session-state.json` for current goals, decisions, risks, and next actions.
 See `AGENTS.md` for project context and milestone history.
 
+## Release 0.45.0 — password focus on open (2026-11-20)
+
+**Status**: tag `v0.45.0` at `a88c058`, CI `44641893826` green (pin `c261d6b`). Host on 0.45.0.
+
+- `init` returned `text_input::focus` before the first layout, so the op was dropped and the cursor stayed out of the password box.
+- `login_focus_pending` latch: the first window `Opened`/`Resized`/`Focused` retries the focus once (subscription only active while pending); sign-out arms it again.
+- No wire/config change. Release 0.44.0's dialog fix still needs one **Apply** in Theming to rewrite the stored cosmic theme.
+
 ## Release 0.44.0 — dialog colours, sidebar icons, hidden modules (2026-11-20)
 
 **Status**: tag `v0.44.0` at `ca692e1`, CI `44635552607` green (pin `93a456f`). Host on 0.44.0.
