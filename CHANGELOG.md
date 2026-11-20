@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Nix update check is parallel and avoids flake fetches**: the metadata
+  lookups for the unique flake references now run in parallel (bounded 4),
+  `flake:` aliases resolve through the registry, and a target that parses as
+  `github:owner/repo[/ref]` with rev pins uses `git ls-remote` (optional
+  `git`, ~0.5 s) instead of `nix flake metadata` (fetch + eval). Comparison
+  rules are unchanged: a revision match wins, the narHash is the fallback,
+  and an update is only reported when a comparable lock proves it. The count
+  and the per-package Upgrade buttons still come from the same response.
+
 ## [0.45.0] — 2026-11-20
 
 ### Fixed

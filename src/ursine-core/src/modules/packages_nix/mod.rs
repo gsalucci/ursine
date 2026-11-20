@@ -382,15 +382,15 @@ fn line_list(outcome: &CommandOutcome) -> Vec<String> {
         .collect()
 }
 
-/// A lock we can compare: source content hash or commit id.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum FlakeLock {
-    Nar(String),
-    Rev(String),
+/// Locks pinned by one profile element's URL.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ElementPin {
+    nar: Option<String>,
+    rev: Option<String>,
 }
 
 /// The current locks of one flake reference (either may be missing).
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct MetaLock {
     nar: Option<String>,
     rev: Option<String>,
@@ -426,33 +426,31 @@ fn is_rev(value: &str) -> bool {
     (7..=40).contains(&value.len()) && value.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-/// A profile element's `url` → the lock it is pinned to: the `narHash`
-/// query parameter first (what `nix profile list --json` emits), then a
-/// `rev=` query parameter, then a hex path segment. `None` means the
-/// element carries no comparable lock — never guess.
-fn element_lock(url: &str) -> Option<FlakeLock> {
+/// Both locks a profile element's `url` pins: the `narHash` query value and
+/// the revision (a `rev=` query value or the hex path segment nix emits).
+/// Empty fields mean "not pinned that way" — never guess.
+fn element_pin(url: &str) -> ElementPin {
     let (path, query) = url.split_once('?').unwrap_or((url, ""));
+    let mut pin = ElementPin::default();
     for pair in query.split('&') {
         if let Some(value) = pair.strip_prefix("narHash=") {
             let nar = percent_decode(value);
             if !nar.is_empty() {
-                return Some(FlakeLock::Nar(nar));
+                pin.nar = Some(nar);
             }
-        }
-    }
-    for pair in query.split('&') {
-        if let Some(value) = pair.strip_prefix("rev=") {
+        } else if let Some(value) = pair.strip_prefix("rev=") {
             if is_rev(value) {
-                return Some(FlakeLock::Rev(value.to_string()));
+                pin.rev = Some(value.to_string());
             }
         }
     }
-    let last = path.rsplit('/').next().unwrap_or("");
-    if is_rev(last) {
-        Some(FlakeLock::Rev(last.to_string()))
-    } else {
-        None
+    if pin.rev.is_none() {
+        let last = path.rsplit('/').next().unwrap_or("");
+        if is_rev(last) {
+            pin.rev = Some(last.to_string());
+        }
     }
+    pin
 }
 
 /// `nix flake metadata <ref> --json` → comparable locks (tolerant:
@@ -474,35 +472,277 @@ fn meta_locks(json: &str) -> MetaLock {
     }
 }
 
-/// True only when the element's lock kind exists in the metadata and
-/// the values differ. A missing matching field means "cannot tell" —
-/// never report an update we cannot prove.
-fn outdatable(lock: &FlakeLock, meta: &MetaLock) -> bool {
-    match lock {
-        FlakeLock::Nar(nar) => meta.nar.as_ref().is_some_and(|current| current != nar),
-        FlakeLock::Rev(rev) => meta.rev.as_ref().is_some_and(|current| current != rev),
+/// Short pins are prefixes of the full commit id.
+fn rev_matches(pinned: &str, current: &str) -> bool {
+    current == pinned || current.starts_with(pinned)
+}
+
+/// True only when a lock kind exists on BOTH sides and the values differ.
+/// A revision comparison wins when the current side reports one (cheap
+/// github path); otherwise the narHash is compared. Missing data means
+/// "cannot tell" — never report an update we cannot prove.
+fn outdatable(pin: &ElementPin, meta: &MetaLock) -> bool {
+    if let (Some(pinned), Some(current)) = (&pin.rev, &meta.rev) {
+        return !rev_matches(pinned, current);
+    }
+    match (&pin.nar, &meta.nar) {
+        (Some(pinned), Some(current)) => pinned != current,
+        _ => false,
     }
 }
 
-/// Element names whose pinned lock differs from the current metadata
-/// lock of their original flake reference (profile order, unique).
+/// A cheap `github:` reference resolvable with `git ls-remote`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GithubRef {
+    owner: String,
+    repo: String,
+    git_ref: Option<String>,
+}
+
+/// `github:owner/repo[/ref]` (a `?dir=` query falls back to metadata: the
+/// subdir does not change the commit, but keep the rule strict anyway).
+fn parse_github_ref(value: &str) -> Option<GithubRef> {
+    let rest = value.strip_prefix("github:")?;
+    if rest.contains('?') || rest.contains('#') {
+        return None;
+    }
+    let mut parts = rest.splitn(3, '/');
+    let owner = parts.next()?;
+    let repo = parts.next()?;
+    let git_ref = parts.next().filter(|value| !value.is_empty());
+    let atom = |value: &str| {
+        !value.is_empty()
+            && value.len() <= 128
+            && !value.starts_with('-')
+            && value
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    };
+    if !atom(owner) || !atom(repo) {
+        return None;
+    }
+    if let Some(git_ref) = git_ref {
+        let good = git_ref.len() <= 256
+            && !git_ref.starts_with('-')
+            && git_ref
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'));
+        if !good {
+            return None;
+        }
+    }
+    Some(GithubRef {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        git_ref: git_ref.map(str::to_string),
+    })
+}
+
+/// `git ls-remote <url> <ref>` output → the first commit id.
+fn parse_ls_remote(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let mut fields = line.split_whitespace();
+        let sha = fields.next()?;
+        is_rev(sha).then(|| sha.to_string())
+    })
+}
+
+/// Resolve `flake:alias` through the registry rows (user > system > global,
+/// the order `nix registry list` prints).
+fn resolve_ref(original: &str, aliases: &HashMap<String, String>) -> String {
+    let mut current = original.to_string();
+    for _ in 0..3 {
+        let Some(name) = current.strip_prefix("flake:") else {
+            break;
+        };
+        let Some(target) = aliases.get(name) else {
+            break;
+        };
+        if target == &current {
+            break;
+        }
+        current.clone_from(target);
+    }
+    current
+}
+
+/// Element names whose pinned lock differs from the current lock of their
+/// original flake reference (profile order, unique).
 fn outdated_names(elements: &[InstalledPackage], metas: &HashMap<String, MetaLock>) -> Vec<String> {
     let mut packages: Vec<String> = Vec::new();
     for element in elements {
-        let (Some(original), Some(url)) = (&element.original_url, &element.url) else {
+        let Some(original) = &element.original_url else {
             continue;
         };
-        let Some(lock) = element_lock(url) else {
+        let Some(url) = &element.url else {
             continue;
         };
+        let pin = element_pin(url);
+        if pin.rev.is_none() && pin.nar.is_none() {
+            continue;
+        }
         let Some(meta) = metas.get(original) else {
             continue;
         };
-        if outdatable(&lock, meta) && !packages.contains(&element.name) {
+        if outdatable(&pin, meta) && !packages.contains(&element.name) {
             packages.push(element.name.clone());
         }
     }
     packages
+}
+
+/// `git` is optional: when present it resolves a github commit id with a
+/// tiny `ls-remote` call instead of a full flake fetch + eval.
+const GIT_CANDIDATES: [&str; 4] = [
+    "/usr/bin/git",
+    "/bin/git",
+    "/usr/local/bin/git",
+    "/run/current-system/sw/bin/git",
+];
+
+fn git_path() -> Option<&'static str> {
+    crate::tooling::find(&GIT_CANDIDATES)
+}
+
+/// Current commit id of a github ref (`HEAD` when the flake names none).
+async fn github_rev(user: &str, github: &GithubRef) -> Option<String> {
+    let git = git_path()?;
+    let url = format!("https://github.com/{}/{}.git", github.owner, github.repo);
+    let spec = github.git_ref.as_deref().unwrap_or("HEAD");
+    let out = exec::run_as_user_argv_tolerant(
+        user,
+        git,
+        &["ls-remote", &url, spec],
+        Duration::from_secs(20),
+        None,
+    )
+    .await
+    .ok()?;
+    (out.code == 0)
+        .then(|| parse_ls_remote(&out.stdout))
+        .flatten()
+}
+
+/// Registry aliases (`flake:name` → target), first row wins (user > system
+/// > global, the order `nix registry list` prints).
+async fn alias_map(user: &str) -> HashMap<String, String> {
+    registry_rows(user)
+        .await
+        .map(|rows| {
+            let mut map = HashMap::new();
+            for row in rows {
+                map.entry(row.name).or_insert(row.url);
+            }
+            map
+        })
+        .unwrap_or_default()
+}
+
+/// One target's current lock: a github commit id via `ls-remote` when the
+/// target is a github flake and every element pinning it carries a rev,
+/// otherwise the full flake metadata.
+async fn target_lock(user: String, target: String, use_github: bool) -> (String, MetaLock) {
+    if use_github {
+        if let Some(github) = parse_github_ref(&target) {
+            if let Some(rev) = github_rev(&user, &github).await {
+                return (
+                    target,
+                    MetaLock {
+                        nar: None,
+                        rev: Some(rev),
+                    },
+                );
+            }
+        }
+    }
+    let lock = exec::run_as_user_json(
+        &user,
+        &[
+            ("flake", ""),
+            ("metadata", ""),
+            ("--json", ""),
+            ("--", target.as_str()),
+        ],
+        UPDATE_CHECK_TIMEOUT,
+    )
+    .await
+    .map_or_else(|_| MetaLock::default(), |out| meta_locks(&out.stdout));
+    (target, lock)
+}
+
+/// Update check: profile list + the current lock of every unique flake
+/// reference, fetched in parallel (github refs use `git ls-remote`, no
+/// flake fetch or eval). Same proof as the sequential version: an update is
+/// reported only when a comparable lock differs.
+async fn nix_updates(user: &str) -> Result<ursine_api::NixUpdates, ApiError> {
+    let out = exec::run_as_user_json(
+        user,
+        &[("profile", ""), ("list", ""), ("--json", "")],
+        UPDATE_CHECK_TIMEOUT,
+    )
+    .await?;
+    let elements = parse::parse_profile_list(&out.stdout)?;
+    let aliases = alias_map(user).await;
+
+    // target → (every element carries a rev, originals that resolve to it)
+    let mut groups: HashMap<String, (bool, Vec<String>)> = HashMap::new();
+    for element in &elements {
+        let (Some(original), Some(url)) = (&element.original_url, element.url.as_deref()) else {
+            continue;
+        };
+        let pin = element_pin(url);
+        if pin.rev.is_none() && pin.nar.is_none() {
+            continue;
+        }
+        if !exec::is_safe_quoted_value(original) {
+            continue;
+        }
+        let target = resolve_ref(original, &aliases);
+        if !exec::is_safe_quoted_value(&target) {
+            continue;
+        }
+        let entry = groups.entry(target).or_insert_with(|| (true, Vec::new()));
+        entry.0 = entry.0 && pin.rev.is_some();
+        if !entry.1.contains(original) {
+            entry.1.push(original.clone());
+        }
+    }
+
+    // Bounded parallelism: a couple of refs are network-bound, the rest
+    // usually hit nix's own cache.
+    let mut pending = groups
+        .iter()
+        .map(|(target, (all_rev, _))| (target.clone(), *all_rev))
+        .collect::<Vec<_>>()
+        .into_iter();
+    let mut set: tokio::task::JoinSet<(String, MetaLock)> = tokio::task::JoinSet::new();
+    let mut locks: HashMap<String, MetaLock> = HashMap::new();
+    for _ in 0..4 {
+        if let Some((target, use_github)) = pending.next() {
+            set.spawn(target_lock(user.to_string(), target, use_github));
+        }
+    }
+    while let Some(joined) = set.join_next().await {
+        if let Ok((target, lock)) = joined {
+            locks.insert(target, lock);
+        }
+        if let Some((target, use_github)) = pending.next() {
+            set.spawn(target_lock(user.to_string(), target, use_github));
+        }
+    }
+
+    let mut metas: HashMap<String, MetaLock> = HashMap::new();
+    for (target, (_, originals)) in groups {
+        let lock = locks.remove(&target).unwrap_or_default();
+        for original in originals {
+            metas.insert(original, lock.clone());
+        }
+    }
+    let packages = outdated_names(&elements, &metas);
+    Ok(ursine_api::NixUpdates {
+        count: packages.len(),
+        packages,
+    })
 }
 
 /// Flake refs embedded in `getFlake "…"`: no quote/backslash/`$`
@@ -945,56 +1185,8 @@ pub async fn handle(action: &Action, ctx: &ModuleCtx<'_>) -> Result<serde_json::
             argv.extend(names);
             start_argv_job(ctx, "upgrade_regex", "nix", argv, MUTATE_TIMEOUT)
         }
-        Action::ListNixUpdates => {
-            // Hand-tested on the reference VM (nix 2.31.5): `profile
-            // upgrade` has NO --dry-run flag, so the check compares each
-            // element's pinned lock with the CURRENT lock of its
-            // original flake reference (`nix flake metadata --json`).
-            // On-demand and network-bound: never automatic without opt-in.
-            let out = exec::run_as_user_json(
-                user,
-                &[("profile", ""), ("list", ""), ("--json", "")],
-                UPDATE_CHECK_TIMEOUT,
-            )
-            .await?;
-            let elements = parse::parse_profile_list(&out.stdout)?;
-            let mut metas: HashMap<String, MetaLock> = HashMap::new();
-            for element in &elements {
-                let (Some(original), Some(url)) = (&element.original_url, &element.url.as_deref())
-                else {
-                    continue;
-                };
-                // One metadata fetch per unique reference, and only for
-                // elements that actually carry a comparable lock.
-                if metas.contains_key(original) || element_lock(url).is_none() {
-                    continue;
-                }
-                // The ref rides a single-quoted VALUE after `--` (so
-                // `&`/`?` queries survive; quotes/newlines do not) —
-                // skip what that guard refuses instead of failing the
-                // whole check.
-                if !exec::is_safe_quoted_value(original) {
-                    continue;
-                }
-                let meta = exec::run_as_user_json(
-                    user,
-                    &[
-                        ("flake", ""),
-                        ("metadata", ""),
-                        ("--json", ""),
-                        ("--", original.as_str()),
-                    ],
-                    UPDATE_CHECK_TIMEOUT,
-                )
-                .await?;
-                metas.insert(original.clone(), meta_locks(&meta.stdout));
-            }
-            let packages = outdated_names(&elements, &metas);
-            Ok(serde_json::json!(ursine_api::NixUpdates {
-                count: packages.len(),
-                packages,
-            }))
-        }
+        Action::ListNixUpdates => Ok(json!(nix_updates(user).await?)),
+
         Action::Generations => {
             let out = exec::run_as_user(user, &[("profile", ""), ("history", "")], HISTORY_TIMEOUT)
                 .await?;
@@ -1188,27 +1380,28 @@ mod tests {
         // reference VM (nix 2.31.5).
         let url = "github:NixOS/nixpkgs/7dcdd87373d72e7a2173e4db02e20d3d7f495cfd\
             ?narHash=sha256-tItrb9M8eYA6WhFgmT9tpGKueri3%2BwRuVA952o/2x";
+        let pin = element_pin(url);
         assert_eq!(
-            element_lock(url),
-            Some(FlakeLock::Nar(
-                "sha256-tItrb9M8eYA6WhFgmT9tpGKueri3+wRuVA952o/2x".to_string()
-            ))
+            pin.nar.as_deref(),
+            Some("sha256-tItrb9M8eYA6WhFgmT9tpGKueri3+wRuVA952o/2x")
+        );
+        assert_eq!(
+            pin.rev.as_deref(),
+            Some("7dcdd87373d72e7a2173e4db02e20d3d7f495cfd")
         );
     }
 
     #[test]
     fn element_lock_falls_back_to_rev_and_none_without_lock() {
         assert_eq!(
-            element_lock("github:a/b/13d0c311e3ae923a00f734b43fd1d35b47d8943a"),
-            Some(FlakeLock::Rev(
-                "13d0c311e3ae923a00f734b43fd1d35b47d8943a".to_string()
-            ))
+            element_pin("github:a/b/13d0c311e3ae923a00f734b43fd1d35b47d8943a").rev,
+            Some("13d0c311e3ae923a00f734b43fd1d35b47d8943a".to_string())
         );
         assert_eq!(
-            element_lock("git+https://example.com/x/y?rev=abcdef1"),
-            Some(FlakeLock::Rev("abcdef1".to_string()))
+            element_pin("git+https://example.com/x/y?rev=abcdef1").rev,
+            Some("abcdef1".to_string())
         );
-        assert_eq!(element_lock("flake:nixpkgs#hello"), None);
+        assert_eq!(element_pin("flake:nixpkgs#hello"), ElementPin::default());
     }
 
     #[test]
@@ -1231,20 +1424,118 @@ mod tests {
     }
 
     #[test]
+    fn element_pin_reads_narhash_and_path_rev() {
+        let pin = element_pin(
+            "github:skea999/ursine/0123456789abcdef0123456789abcdef01234567?narHash=sha256-a%2Bb%3D",
+        );
+        assert_eq!(
+            pin.rev.as_deref(),
+            Some("0123456789abcdef0123456789abcdef01234567")
+        );
+        assert_eq!(pin.nar.as_deref(), Some("sha256-a+b="));
+        let short = element_pin("github:o/r/abcdef1");
+        assert_eq!(short.rev.as_deref(), Some("abcdef1"));
+        assert!(short.nar.is_none());
+        assert_eq!(element_pin("path:/nix/store/x"), ElementPin::default());
+    }
+
+    #[test]
+    fn rev_comparison_prefers_revisions_and_falls_back_to_nar() {
+        let pin =
+            element_pin("github:o/r/0123456789abcdef0123456789abcdef01234567?narHash=sha256-a");
+        let newer = MetaLock {
+            nar: None,
+            rev: Some("fedcba9876543210fedcba9876543210fedcba98".into()),
+        };
+        assert!(outdatable(&pin, &newer));
+        let same = MetaLock {
+            nar: None,
+            rev: Some("0123456789abcdef0123456789abcdef01234567".into()),
+        };
+        assert!(!outdatable(&pin, &same));
+        // No revision on the table → look at the narHash.
+        let nar_same = MetaLock {
+            nar: Some("sha256-a".into()),
+            rev: None,
+        };
+        assert!(!outdatable(&pin, &nar_same));
+        let nar_new = MetaLock {
+            nar: Some("sha256-b".into()),
+            rev: None,
+        };
+        assert!(outdatable(&pin, &nar_new));
+        // Nothing comparable → never guess.
+        assert!(!outdatable(&pin, &MetaLock::default()));
+    }
+
+    #[test]
+    fn github_refs_parse_and_ls_remote_output_is_checked() {
+        let github = parse_github_ref("github:nix-community/nixGL").unwrap();
+        assert_eq!(github.owner, "nix-community");
+        assert_eq!(github.repo, "nixGL");
+        assert_eq!(github.git_ref, None);
+        let pinned = parse_github_ref("github:NixOS/nixpkgs/nixos-26.05").unwrap();
+        assert_eq!(pinned.git_ref.as_deref(), Some("nixos-26.05"));
+        assert!(parse_github_ref("github:owner/repo?dir=sub").is_none());
+        assert!(parse_github_ref("github:-bad/repo").is_none());
+        assert!(parse_github_ref("flake:nixpkgs").is_none());
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        assert_eq!(
+            parse_ls_remote(&format!("{sha}\trefs/heads/main\n")),
+            Some(sha.to_string())
+        );
+        assert!(parse_ls_remote("not a sha\trefs/heads/main").is_none());
+    }
+
+    #[test]
+    fn aliases_resolve_like_nix() {
+        let mut aliases = HashMap::new();
+        aliases.insert(
+            "nixpkgs".to_string(),
+            "github:NixOS/nixpkgs/nixpkgs-unstable".to_string(),
+        );
+        aliases.insert("other".to_string(), "flake:nixpkgs".to_string());
+        assert_eq!(
+            resolve_ref("flake:nixpkgs", &aliases),
+            "github:NixOS/nixpkgs/nixpkgs-unstable"
+        );
+        // One level of alias chaining is enough; a cycle stops.
+        assert_eq!(
+            resolve_ref("flake:other", &aliases),
+            "github:NixOS/nixpkgs/nixpkgs-unstable"
+        );
+        assert_eq!(resolve_ref("github:o/r", &aliases), "github:o/r");
+        assert_eq!(resolve_ref("flake:unknown", &aliases), "flake:unknown");
+    }
+
+    #[test]
     fn outdatable_requires_a_matching_lock_kind() {
         let meta = MetaLock {
             nar: Some("sha256-b".to_string()),
             rev: Some("aaaaaaa".to_string()),
         };
-        assert!(outdatable(&FlakeLock::Nar("sha256-a".to_string()), &meta));
-        assert!(!outdatable(&FlakeLock::Nar("sha256-b".to_string()), &meta));
-        assert!(outdatable(&FlakeLock::Rev("bbbbbbb".to_string()), &meta));
-        assert!(!outdatable(&FlakeLock::Rev("aaaaaaa".to_string()), &meta));
+        let nar = ElementPin {
+            nar: Some("sha256-a".to_string()),
+            rev: None,
+        };
+        assert!(outdatable(&nar, &meta));
+        let nar_same = ElementPin {
+            nar: Some("sha256-b".to_string()),
+            rev: None,
+        };
+        assert!(!outdatable(&nar_same, &meta));
+        let rev = ElementPin {
+            nar: None,
+            rev: Some("bbbbbbb".to_string()),
+        };
+        assert!(outdatable(&rev, &meta));
+        let rev_same = ElementPin {
+            nar: None,
+            rev: Some("aaaaaaa".to_string()),
+        };
+        assert!(!outdatable(&rev_same, &meta));
         // No matching field on the metadata side → cannot tell.
-        assert!(!outdatable(
-            &FlakeLock::Nar("sha256-a".to_string()),
-            &MetaLock::default()
-        ));
+        assert!(!outdatable(&nar, &MetaLock::default()));
     }
 
     #[test]

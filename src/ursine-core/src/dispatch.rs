@@ -517,6 +517,7 @@ fn uses_profile(action: &Action) -> bool {
             | Action::WipeHistory { .. }
             | Action::DiffClosures { .. }
             | Action::PruneGenerations { .. }
+            | Action::ListNixUpdates
             // Flake registry: the user registry lives in the target's home
             // (`~/.config/nix/registry.json`), so the actions are user-scoped.
             | Action::ListNixRepositories { .. }
