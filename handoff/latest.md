@@ -6,6 +6,16 @@
 See `state/session-state.json` for current goals, decisions, risks, and next actions.
 See `AGENTS.md` for project context and milestone history.
 
+## Release 0.46.0 — fast nix update check (2026-11-20)
+
+**Status**: tag `v0.46.0` at `4adef55`, CI `44647630161` green (pin `cb46c1e`). Host on 0.46.0.
+
+- **What the button did**: `nix profile list --json`, then one `nix flake metadata --json` per unique `originalUrl`, **sequentially**. `nix flake metadata` fetches the flake and evaluates it, so channel tarballs (and github repos on a cold cache) dominate the time; `flake:nixpkgs` can re-download a ~40 MB tree once its tarball TTL expires.
+- **Now**: unique refs are fetched **in parallel (bounded 4)**; `flake:` aliases resolve through `nix registry list` (user > system > global); a target parsing as `github:owner/repo[/ref]` whose elements all pin a rev uses `git ls-remote` (optional `git`, ~0.45 s, no fetch/eval); everything else keeps `nix flake metadata`.
+- **Comparison unchanged**: revision match first, narHash fallback, update reported only when a comparable lock proves it. Count and per-package Upgrade buttons still come from the single response.
+- **Also**: `list_nix_updates` joined the user-scoped allowlist, so `ursinectl … --as-user` works like the GUI.
+- **Measured on the host** (`ursinectl nix list_nix_updates --as-user gab`): 1.39 s cold-ish, 0.95 s warm, 14 updates; two github refs go through ls-remote, `flake:nixpkgs` (channel alias here) through metadata.
+
 ## Release 0.45.0 — password focus on open (2026-11-20)
 
 **Status**: tag `v0.45.0` at `a88c058`, CI `44641893826` green (pin `c261d6b`). Host on 0.45.0.
