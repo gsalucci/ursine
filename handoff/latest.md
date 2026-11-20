@@ -6,6 +6,15 @@
 See `state/session-state.json` for current goals, decisions, risks, and next actions.
 See `AGENTS.md` for project context and milestone history.
 
+## Release 0.47.0 — audit of the package-manager surface (2026-11-20)
+
+**Status**: tag `v0.47.0` at `47c8925`, CI `44653055406` green (pin `8091752`). Host on 0.47.0, protocol **7**.
+
+- **Auto-check on for nix** (`UpdatesAuto` default `nix: true`; explicit `[updates] nix = false` still wins). Verified on the host: `config get_config` → `{"apk":true,"flatpak":true,"nix":true}`.
+- **`refresh_apk` removed** (protocol v7): no GUI control since the 0.31 decision (`list_apk_updates` refreshes indexes first) and the only package action outside the job path. Verified: the action is an unknown variant now; `list_nix_updates --as-user gab` still returns 14 updates.
+- **Audit result**: every remaining action of `packages_nix` (18), `packages_apk` (13) and `packages_flatpak` (14) is referenced by the GUI, mutations go through the job registry, reads answer synchronously. CLI parity is the generic `ursinectl <module> <action>` surface; destructive classification covers the risky set. Nix `upgrade` stays non-destructive by design (profile history/rollback).
+- Search Repository dropdown always offers `nixpkgs` plus the current scope's entries (system-only entries appear in the System scope).
+
 ## Release 0.46.0 — fast nix update check (2026-11-20)
 
 **Status**: tag `v0.46.0` at `4adef55`, CI `44647630161` green (pin `cb46c1e`). Host on 0.46.0.
