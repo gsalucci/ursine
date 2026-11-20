@@ -153,8 +153,6 @@ pub enum Action {
     SearchApk {
         query: String,
     },
-    /// Refresh APK repository indexes.
-    RefreshApk,
     /// Configured APK repositories.
     ListApkRepositories,
     /// Add an APK repository line (`tag` masks it: `@tag url` is

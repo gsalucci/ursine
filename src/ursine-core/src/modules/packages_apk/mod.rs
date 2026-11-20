@@ -21,7 +21,6 @@ pub async fn handle(action: &Action, ctx: &ModuleCtx<'_>) -> Result<serde_json::
     match action {
         Action::ListApk => Ok(json!({"packages": installed().await?})),
         Action::SearchApk { query } => Ok(json!({"packages": search(query).await?})),
-        Action::RefreshApk => Ok(json!({"output": run(&["update"]).await?})),
         Action::ListApkRepositories => Ok(json!({"repositories": repositories()?})),
         Action::AddApkRepository { url, tag } => {
             validate_repo_url(url)?;

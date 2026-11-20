@@ -54,7 +54,7 @@ MODULES (wire name; short alias in parentheses):
                       prune_generations, list_nix_repositories,
                       add_nix_repository, remove_nix_repository,
                       list_nix_updates
-  packages_apk(apk)   list_apk, search_apk, refresh_apk,
+  packages_apk(apk)   list_apk, search_apk,
                       apk_remove_regex, apk_upgrade_regex,
                       list_apk_repositories, add_apk_repository,
                       remove_apk_repository, install_apk,

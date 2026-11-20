@@ -129,7 +129,7 @@ call may only target the caller's own account.
 
 ### packages_apk (`apk`)
 
-`list_apk`, `search_apk query=…`, `refresh_apk`,
+`list_apk`, `search_apk query=…`,
 `list_apk_repositories`, `add_apk_repository url=… [tag=…]`,
 `remove_apk_repository url=…`,
 `install_apk package=…`,

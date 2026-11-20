@@ -4,6 +4,10 @@
 
 ### Changed
 
+- **Wire protocol v7**: `refresh_apk` is gone — it had no GUI control (the
+  update check refreshes the indexes first) and was the only action outside
+  the job path. The package-manager surface is otherwise unchanged and every
+  remaining action has a GUI control.
 - **Nix update check on by default**: with the parallel + `git ls-remote`
   path the check costs ~1 s, so "Check updates automatically" now defaults on
   for all three managers. An explicit `[updates] nix = false` in

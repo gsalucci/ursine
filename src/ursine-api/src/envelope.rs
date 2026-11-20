@@ -19,7 +19,7 @@ use crate::token::SessionToken;
 /// v5: no D-Bus — `set_bluetooth_pairing_pin` removed (pairing is
 /// bluetoothctl's own agent), `BluetoothView.pairing_pin_set` removed,
 /// capability `accountsservice` renamed to `shadow` (user CLI probe).
-pub const PROTOCOL_VERSION: u16 = 6;
+pub const PROTOCOL_VERSION: u16 = 7;
 
 const fn wire_version() -> u16 {
     PROTOCOL_VERSION

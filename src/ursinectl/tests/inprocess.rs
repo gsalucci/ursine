@@ -980,7 +980,7 @@ async fn every_audited_sample_leaves_a_trace() {
         "job_output polls must never be audited: {audited:?}"
     );
     // Skipped samples never executed → never audited.
-    for absent in ["init", "set_module_switch", "refresh_apk", "upgrade_apk"] {
+    for absent in ["init", "set_module_switch", "upgrade_apk"] {
         assert!(
             !audited.iter().any(|a| a == absent),
             "{absent} was not run but appears in audit"

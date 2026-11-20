@@ -251,13 +251,6 @@ pub const SAMPLES: &[Sample] = &[
     },
     Sample {
         module: ursine_api::ModuleId::PackagesApk,
-        action: "refresh_apk",
-        pairs: &[],
-        destructive: false,
-        dispatch: Dispatch::Skip,
-    },
-    Sample {
-        module: ursine_api::ModuleId::PackagesApk,
         action: "list_apk_repositories",
         pairs: &[],
         destructive: false,
@@ -1250,7 +1243,6 @@ pub const ALL_ACTIONS: &[&str] = &[
     "printer_jobs",
     "prune_generations",
     "refresh",
-    "refresh_apk",
     "reload_firewall",
     "remove",
     "remove_all",

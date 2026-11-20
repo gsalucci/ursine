@@ -11,7 +11,6 @@ center as the Nix store. Both backends are capability-gated and audited.
 |---|---|
 | `list_apk` | `apk info -v` + `apk info` (name/version pairing) + `/lib/apk/db/installed` (`T:` descriptions) + ONE `apk policy <names…>` (origin URL) + repositories list = `/etc/apk/repositories` **plus every file in `/etc/apk/repositories.d/`** (mask tag; row `label` built daemon-side) → `description` / `origin` / `origin_label` |
 | `search_apk` | `apk search -v <query>` |
-| `refresh_apk` | `apk update` |
 | `list_apk_repositories` | parse `/etc/apk/repositories` PLUS every regular file in `/etc/apk/repositories.d/` (`[@tag] url`); the row `label` is built daemon-side (`@tag`, else the path identity) |
 | `add_apk_repository` | upsert the line + `apk update` (atomic write + backup) |
 | `remove_apk_repository` | drop the line + `apk update` (atomic write + backup) |
