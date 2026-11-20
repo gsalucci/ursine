@@ -177,6 +177,8 @@ pub struct PackageVm<'a> {
     pub repositories: SectionVm<'a>,
     pub pattern: PatternSection,
     pub list: ListVm<'a>,
+    /// Search results, rendered in their own dialog (all three managers).
+    pub search_list: Option<ListVm<'a>>,
     pub generations: Option<SectionVm<'a>>,
     /// Opens the generations browser dialog (nix only).
     pub generations_browse: Message,
@@ -254,6 +256,7 @@ pub fn view<'a>(vm: PackageVm<'a>) -> Element<'a, Message> {
         repositories,
         pattern,
         list,
+        search_list: _,
         generations,
         generations_browse,
     } = vm;
@@ -796,6 +799,7 @@ mod tests {
                 armed: false,
                 result: None,
             },
+            search_list: None,
             list: ListVm {
                 title: "Installed (0)".to_string(),
                 browse: Message::PackageListBrowserClose,

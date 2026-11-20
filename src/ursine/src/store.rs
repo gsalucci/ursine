@@ -353,6 +353,9 @@ pub struct StoreState {
     pub search_results: Vec<SearchResult>,
     pub search_busy: bool,
     pub search_done: bool,
+    /// Results dialog open (opened by Search, closed by its Close button).
+    pub search_open: bool,
+    pub search_page: usize,
     pub search_truncated: bool,
     pub search_error: Option<String>,
     /// Last successful prune preview; apply must match it exactly.
@@ -412,6 +415,8 @@ impl Default for StoreState {
             search_results: Vec::new(),
             search_busy: false,
             search_done: false,
+            search_open: false,
+            search_page: 0,
             search_truncated: false,
             search_error: None,
             prune_preview: None,
@@ -499,6 +504,8 @@ impl StoreState {
         self.search_results.clear();
         self.search_done = false;
         self.search_busy = false;
+        self.search_open = false;
+        self.search_page = 0;
         self.search_truncated = false;
         self.search_error = None;
         self.search_seq = self.search_seq.wrapping_add(1);
@@ -520,12 +527,11 @@ impl StoreState {
         self.search_seq = self.search_seq.wrapping_add(1);
         self.search_busy = true;
         self.search_done = false;
+        self.search_open = true;
+        self.search_page = 0;
         self.search_truncated = false;
         self.search_results.clear();
         self.search_error = None;
-        self.installed_page = 0;
-        // The list shows the installed profile again while in flight.
-        self.rebuild_filter_keys();
         self.search_seq
     }
 
@@ -552,26 +558,18 @@ impl StoreState {
     /// (installed profile or search results) — the filter then costs
     /// zero allocations per frame.
     pub fn rebuild_filter_keys(&mut self) {
-        self.filter_keys = if self.search_done {
-            self.search_results
-                .iter()
-                .map(|result| match (&result.pname, &result.version) {
-                    (Some(name), Some(version)) => format!("{name} {version}"),
-                    (Some(name), None) => name.clone(),
-                    (None, _) => result.attr.clone(),
-                })
-                .collect()
-        } else {
-            self.packages
-                .iter()
-                .map(|package| {
-                    package.version.as_deref().map_or_else(
-                        || package.name.clone(),
-                        |version| format!("{} {version}", package.name),
-                    )
-                })
-                .collect()
-        };
+        // The page filter always targets the installed list: search results
+        // live in their own dialog.
+        self.filter_keys = self
+            .packages
+            .iter()
+            .map(|package| {
+                package.version.as_deref().map_or_else(
+                    || package.name.clone(),
+                    |version| format!("{} {version}", package.name),
+                )
+            })
+            .collect();
     }
 
     pub fn scope_ready(&self) -> bool {
@@ -914,25 +912,108 @@ impl StoreState {
             result: self.pattern_result.clone(),
         };
 
-        // --- Bottom list: search results while a search is done,
-        // otherwise the installed profile (apk pattern) ---
-        let showing_results = self.search_done;
-        // Filter the SOURCE against precomputed keys (zero allocations
-        // per frame), then build ONLY the current page's widgets.
+        // --- Installed list (search results live in their own dialog) ---
         let query = self.installed_filter.trim();
         let filtering = !query.is_empty();
-        let (matched, rows): (usize, Vec<RowVm<'_>>) = if showing_results {
-            let matches: Vec<&SearchResult> = self
+        let matches: Vec<&InstalledPackage> = self
+            .packages
+            .iter()
+            .zip(self.filter_keys.iter())
+            .filter(|(_, key)| crate::package_ui::contains_ci(key, query))
+            .map(|(package, _)| package)
+            .collect();
+        let total = matches.len();
+        let (page_count, page, start) = crate::package_ui::page_bounds(total, self.installed_page);
+        let rows: Vec<RowVm<'_>> = matches
+            .into_iter()
+            .skip(start)
+            .take(crate::package_ui::PAGE_SIZE)
+            .map(|package| {
+                let (description, repository, notes) =
+                    package_detail_parts(package, &self.repositories);
+                let mut actions: Vec<Element<'_, Message>> = Vec::with_capacity(2);
+                // Upgrade only when the last check named this element as
+                // outdated; without a check the button is gone.
+                let updatable = self.nix_updates.as_ref().is_some_and(|updates| {
+                    updates.packages.iter().any(|name| name == &package.name)
+                });
+                if updatable {
+                    actions.push(
+                        button::text("Upgrade")
+                            .on_press_maybe(enabled.then(|| {
+                                Message::StoreActionRequested(StoreAction::Upgrade(
+                                    package.name.clone(),
+                                ))
+                            }))
+                            .into(),
+                    );
+                }
+                actions.push(
+                    button::text("Remove")
+                        .on_press_maybe(enabled.then(|| {
+                            Message::StoreActionRequested(StoreAction::Remove(package.name.clone()))
+                        }))
+                        .into(),
+                );
+                RowVm {
+                    compact,
+                    title: package.version.as_deref().map_or_else(
+                        || package.name.clone(),
+                        |version| format!("{} {version}", package.name),
+                    ),
+                    description,
+                    repository,
+                    notes,
+                    actions,
+                }
+            })
+            .collect();
+        let empty_note = if rows.is_empty() {
+            if filtering {
+                Some(("No matches".to_string(), "No packages matched.".to_string()))
+            } else if !self.busy {
+                Some(("Result".to_string(), "No packages installed.".to_string()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let status = if self.busy && self.packages.is_empty() {
+            vec![("Status".to_string(), "Loading profile…".to_string())]
+        } else {
+            Vec::new()
+        };
+        let list = ListVm {
+            page,
+            page_count,
+            page_previous: Message::StoreListPagePrevious,
+            page_next: Message::StoreListPageNext,
+            browse: Message::StoreListBrowserOpen,
+            filter: Some(crate::package_ui::FilterVm {
+                value: self.installed_filter.clone(),
+                on_input: Message::StoreFilterChanged,
+            }),
+            title: format!("Installed ({total}) — {}", self.profile_user()),
+            status,
+            empty_note,
+            rows,
+            footer: vec![settings::item(
+                "Profile actions",
+                button::text("Remove all").on_press_maybe(
+                    enabled.then(|| Message::StoreActionRequested(StoreAction::RemoveAll)),
+                ),
+            )
+            .into()],
+        };
+
+        // --- Search dialog (one window, installed list untouched) ---
+        let search_list = self.search_open.then(|| {
+            let len = self.search_results.len();
+            let (page_count, page, start) = crate::package_ui::page_bounds(len, self.search_page);
+            let rows: Vec<RowVm<'_>> = self
                 .search_results
                 .iter()
-                .zip(self.filter_keys.iter())
-                .filter(|(_, key)| crate::package_ui::contains_ci(key, query))
-                .map(|(result, _)| result)
-                .collect();
-            let len = matches.len();
-            let (_, _, start) = crate::package_ui::page_bounds(len, self.installed_page);
-            let rows = matches
-                .into_iter()
                 .skip(start)
                 .take(crate::package_ui::PAGE_SIZE)
                 .map(|result| RowVm {
@@ -942,8 +1023,6 @@ impl StoreState {
                         (Some(name), None) => name.clone(),
                         (None, _) => result.attr.clone(),
                     },
-                    // Old search rows always carried a description
-                    // line — keep the "no description" placeholder.
                     description: Some(
                         result
                             .description
@@ -965,119 +1044,34 @@ impl StoreState {
                         .into()],
                 })
                 .collect();
-            (len, rows)
-        } else {
-            let matches: Vec<&InstalledPackage> = self
-                .packages
-                .iter()
-                .zip(self.filter_keys.iter())
-                .filter(|(_, key)| crate::package_ui::contains_ci(key, query))
-                .map(|(package, _)| package)
-                .collect();
-            let len = matches.len();
-            let (_, _, start) = crate::package_ui::page_bounds(len, self.installed_page);
-            let rows = matches
-                .into_iter()
-                .skip(start)
-                .take(crate::package_ui::PAGE_SIZE)
-                .map(|package| {
-                    let (description, repository, notes) =
-                        package_detail_parts(package, &self.repositories);
-                    let mut actions: Vec<Element<'_, Message>> = Vec::with_capacity(2);
-                    // Upgrade only when the last check named this element
-                    // as outdated; without a check the button is gone.
-                    let updatable = self.nix_updates.as_ref().is_some_and(|updates| {
-                        updates.packages.iter().any(|name| name == &package.name)
-                    });
-                    if updatable {
-                        actions.push(
-                            button::text("Upgrade")
-                                .on_press_maybe(enabled.then(|| {
-                                    Message::StoreActionRequested(StoreAction::Upgrade(
-                                        package.name.clone(),
-                                    ))
-                                }))
-                                .into(),
-                        );
-                    }
-                    actions.push(
-                        button::text("Remove")
-                            .on_press_maybe(enabled.then(|| {
-                                Message::StoreActionRequested(StoreAction::Remove(
-                                    package.name.clone(),
-                                ))
-                            }))
-                            .into(),
-                    );
-                    RowVm {
-                        compact,
-                        // Same `name version` title as apk/flatpak.
-                        title: package.version.as_deref().map_or_else(
-                            || package.name.clone(),
-                            |version| format!("{} {version}", package.name),
-                        ),
-                        description,
-                        repository,
-                        notes,
-                        actions,
-                    }
-                })
-                .collect();
-            (len, rows)
-        };
-        let (page_count, page, _) = crate::package_ui::page_bounds(matched, self.installed_page);
-        let empty_note = if rows.is_empty() {
-            if filtering || showing_results {
-                Some(("No matches".to_string(), "No packages matched.".to_string()))
-            } else if !self.busy {
-                Some(("Result".to_string(), "No packages installed.".to_string()))
+            let status = if self.search_busy {
+                vec![("Status".to_string(), "Searching…".to_string())]
+            } else if let Some(error) = &self.search_error {
+                vec![("Error".to_string(), error.clone())]
             } else {
-                None
+                Vec::new()
+            };
+            let empty_note = (!self.search_busy && self.search_done && len == 0)
+                .then(|| ("No matches".to_string(), "No packages matched.".to_string()));
+            let title = if self.search_truncated && self.search_done {
+                format!("Search results (first {len} of more — narrow the query)")
+            } else {
+                format!("Search results ({len})")
+            };
+            ListVm {
+                title,
+                browse: Message::StoreSearchClose,
+                page,
+                page_count,
+                page_previous: Message::StoreSearchPagePrevious,
+                page_next: Message::StoreSearchPageNext,
+                filter: None,
+                status,
+                empty_note,
+                rows,
+                footer: Vec::new(),
             }
-        } else {
-            None
-        };
-        let status = if !showing_results && self.busy && self.packages.is_empty() {
-            vec![("Status".to_string(), "Loading profile…".to_string())]
-        } else {
-            Vec::new()
-        };
-        let footer: Vec<Element<'_, Message>> = if showing_results {
-            Vec::new()
-        } else {
-            vec![settings::item(
-                "Profile actions",
-                button::text("Remove all").on_press_maybe(
-                    enabled.then(|| Message::StoreActionRequested(StoreAction::RemoveAll)),
-                ),
-            )
-            .into()]
-        };
-        let listed = matched;
-        let list = ListVm {
-            page,
-            page_count,
-            page_previous: Message::StoreListPagePrevious,
-            page_next: Message::StoreListPageNext,
-            browse: Message::StoreListBrowserOpen,
-            filter: Some(crate::package_ui::FilterVm {
-                value: self.installed_filter.clone(),
-                on_input: Message::StoreFilterChanged,
-            }),
-            title: if showing_results {
-                if self.search_truncated {
-                    format!("Search results (first {listed} of more — narrow the query)")
-                } else {
-                    format!("Search results ({listed})")
-                }
-            } else {
-                format!("Installed ({listed}) — {}", self.profile_user())
-            },
-            status,
-            empty_note,
-            rows,
-            footer,
-        };
+        });
 
         // --- Generations (nix-only slot) ---
         let mut generation_items: Vec<Element<'_, Message>> = vec![settings::item(
@@ -1234,6 +1228,7 @@ impl StoreState {
             repositories,
             pattern,
             list,
+            search_list,
             generations,
             generations_browse: Message::StoreGenerationsBrowserOpen,
         }

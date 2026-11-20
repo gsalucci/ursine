@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Package search opens its own window**: typing a query and pressing Search
+  now shows the results in a half-page dialog (pagination and Install inside,
+  Close to dismiss) for nix, apk and flatpak, while the installed list stays
+  on the page. Each manager keeps its own page and results; switching tab or
+  installation closes the dialog. No wire change.
+
 ## [0.47.0] — 2026-11-20
 
 ### Changed

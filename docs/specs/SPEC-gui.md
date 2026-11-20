@@ -18,9 +18,9 @@ The native frontend `ursine`: **libcosmic** app, thin client of `ursined`. GNOME
 |---|---|
 | Login | password prompt (user pre-filled from session, password field); on success token kept in process memory only |
 | Home/Overview | module cards: enabled (green, opens panel) / disabled (grey + reason + fix command + "Run fix" if trivial) — from `capabilities.list` |
-| Store (nix) | search field (results list w/ description), installed list, install/remove/upgrade buttons with progress, per-user selector (asUser dropdown) |
-| APK | installed/search rows, install/remove/upgrade, repository refresh |
-| Flatpak | installed/search rows, system/user dropdown, install/remove/update |
+| Store (nix) | search field (a Search opens its own results window with description, pagination and Install; the installed list stays untouched), installed list, install/remove/upgrade buttons with progress, per-user selector (asUser dropdown) |
+| APK | installed rows, install/remove/upgrade, repository management; a Search opens its own results window |
+| Flatpak | installed rows, system/user dropdown, install/remove/update; a Search opens its own results window |
 | Snapshots | btrbk list (source, timestamp), "Create snapshot", restore flow (preview diff/stats → confirm dialog typing the snapshot name), btrbk config summary, retention info |
 | Users | list (avatar placeholder, name, admin badge), create dialog (name, full name, admin toggle), set password, delete (confirm), groups editor |
 | Niri | dynamic form pages rendered from `niri.schema` (sections sidebar: Input, Outputs, Layout, Animations, Keybinds, Gestures, Autostart, Env); Apply bar with validate state; keybind capture widget |

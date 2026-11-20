@@ -333,6 +333,9 @@ pub enum Message {
     PackageInstallRemoteChanged(String),
     PackageScopeChanged(usize),
     PackageSearchRequested,
+    PackageSearchClose,
+    PackageSearchPagePrevious,
+    PackageSearchPageNext,
     PackageInstallRequested,
     PackageInstallDirect(String),
     PackageInstallInfoLoaded(u64, String, Result<FlatpakInfo, ApiError>),
@@ -500,6 +503,9 @@ pub enum Message {
     StoreSearchChanged(String),
     StoreSearchSubmitted,
     StoreSearchRepoChanged(usize),
+    StoreSearchClose,
+    StoreSearchPagePrevious,
+    StoreSearchPageNext,
     StoreReposLoaded(u64, u64, Result<Vec<ursine_api::NixRepository>, ApiError>),
     StoreRepoNameChanged(String),
     StoreRepoUrlChanged(String),
@@ -757,10 +763,20 @@ impl cosmic::Application for App {
                 self.packages.installed_page = self.packages.installed_page.saturating_sub(1);
             }
             Message::PackageListPageNext => self.packages.installed_page += 1,
+            Message::PackageSearchClose => self.packages.search_open = false,
+            Message::PackageSearchPagePrevious => {
+                self.packages.search_page = self.packages.search_page.saturating_sub(1);
+            }
+            Message::PackageSearchPageNext => self.packages.search_page += 1,
             Message::StoreListPagePrevious => {
                 self.store.installed_page = self.store.installed_page.saturating_sub(1);
             }
             Message::StoreListPageNext => self.store.installed_page += 1,
+            Message::StoreSearchClose => self.store.search_open = false,
+            Message::StoreSearchPagePrevious => {
+                self.store.search_page = self.store.search_page.saturating_sub(1);
+            }
+            Message::StoreSearchPageNext => self.store.search_page += 1,
             Message::StoreGenerationsPagePrevious => {
                 self.store.generations_page = self.store.generations_page.saturating_sub(1);
             }
@@ -1348,6 +1364,8 @@ impl cosmic::Application for App {
                 // the previous installation's numbers: ignore while busy.
                 if !self.packages.action_busy {
                     self.packages.system = index == 0;
+                    // Results belong to the previous installation.
+                    self.packages.search_open = false;
                     // Sizes fetched for the previous installation are stale.
                     self.packages.pending_install = None;
                     return self.load_packages(self.packages.kind.unwrap_or(PackageKind::Apk));
@@ -2303,6 +2321,15 @@ impl App {
                         ));
                     }
                 }
+                if self.store.search_open {
+                    let vm = self.store.vm(updates_auto.nix, compact);
+                    if let Some(list) = vm.search_list {
+                        return Some(crate::package_ui::list_dialog(
+                            list,
+                            Message::StoreSearchClose,
+                        ));
+                    }
+                }
             }
             PackageTab::Apk => {
                 if self.packages.list_browser && self.packages.kind == Some(PackageKind::Apk) {
@@ -2311,6 +2338,15 @@ impl App {
                         vm.list,
                         Message::PackageListBrowserClose,
                     ));
+                }
+                if self.packages.search_open && self.packages.kind == Some(PackageKind::Apk) {
+                    let vm = self.packages.vm(PackageKind::Apk, updates_auto, compact);
+                    if let Some(list) = vm.search_list {
+                        return Some(crate::package_ui::list_dialog(
+                            list,
+                            Message::PackageSearchClose,
+                        ));
+                    }
                 }
             }
             PackageTab::Flatpak => {
@@ -2322,6 +2358,17 @@ impl App {
                         vm.list,
                         Message::PackageListBrowserClose,
                     ));
+                }
+                if self.packages.search_open && self.packages.kind == Some(PackageKind::Flatpak) {
+                    let vm = self
+                        .packages
+                        .vm(PackageKind::Flatpak, updates_auto, compact);
+                    if let Some(list) = vm.search_list {
+                        return Some(crate::package_ui::list_dialog(
+                            list,
+                            Message::PackageSearchClose,
+                        ));
+                    }
                 }
             }
         }
@@ -2962,6 +3009,9 @@ impl App {
         self.packages.list_browser = false;
         self.store.list_browser = false;
         self.store.generations_browser = false;
+        // Search dialogs are per-tab too.
+        self.packages.search_open = false;
+        self.store.search_open = false;
         match tab {
             PackageTab::Nix => self.load_store(),
             PackageTab::Apk => {
@@ -3031,7 +3081,6 @@ impl App {
             return Task::none();
         }
         self.packages.busy = true;
-        self.packages.searching = false;
         self.packages.search_busy = false;
         self.packages.installed_page = 0;
         self.packages.error = None;
@@ -3125,7 +3174,6 @@ impl App {
         match result {
             Ok(packages) => {
                 self.packages.apply_apk(packages);
-                self.packages.searching = false;
             }
             Err(error) => {
                 if self.handle_session_error(&error) {
@@ -3336,7 +3384,6 @@ impl App {
             Ok((packages, orphans)) => {
                 self.packages.orphans = orphans;
                 self.packages.apply_flatpak(packages);
-                self.packages.searching = false;
             }
             Err(error) => {
                 if self.handle_session_error(&error) {
@@ -3389,8 +3436,9 @@ impl App {
         self.packages.installed_page = 0;
         match result {
             Ok(packages) => {
-                self.packages.apply_apk(packages);
-                self.packages.searching = true;
+                self.packages.search_apk = packages;
+                self.packages.search_open = true;
+                self.packages.search_page = 0;
             }
             Err(error) => {
                 if self.handle_session_error(&error) {
@@ -3415,8 +3463,9 @@ impl App {
         self.packages.installed_page = 0;
         match result {
             Ok(packages) => {
-                self.packages.apply_flatpak(packages);
-                self.packages.searching = true;
+                self.packages.search_flatpak = packages;
+                self.packages.search_open = true;
+                self.packages.search_page = 0;
             }
             Err(error) => {
                 if self.handle_session_error(&error) {
@@ -3446,6 +3495,8 @@ impl App {
         let epoch = self.epoch;
         self.packages.busy = true;
         self.packages.search_busy = true;
+        self.packages.search_open = true;
+        self.packages.search_page = 0;
         self.packages.error = None;
         Task::future(async move {
             match kind {
@@ -3916,7 +3967,6 @@ impl App {
         match result {
             Ok(value) => {
                 self.packages.error = None;
-                self.packages.searching = false;
                 if let Some(job_id) = value
                     .get("job_id")
                     .and_then(serde_json::Value::as_str)
@@ -6697,9 +6747,9 @@ impl App {
                 self.store.search_results = page.results;
                 self.store.search_truncated = page.truncated;
                 self.store.search_done = true;
+                self.store.search_open = true;
+                self.store.search_page = 0;
                 self.store.search_error = None;
-                self.store.installed_page = 0;
-                self.store.rebuild_filter_keys();
             }
             Err(error) => {
                 if self.handle_session_error(&error) {

@@ -32,6 +32,17 @@ fn filtered_page<'a, T>(
     (len, page)
 }
 
+/// Search dialog status rows: busy line while the daemon works.
+fn search_status(busy: bool, error: Option<&String>) -> Vec<(String, String)> {
+    if busy {
+        vec![("Status".to_string(), "Searching…".to_string())]
+    } else if let Some(error) = error {
+        vec![("Error".to_string(), error.clone())]
+    } else {
+        Vec::new()
+    }
+}
+
 /// One installed/search row: identity, description, repository, actions.
 fn package_row<'a>(
     name: &str,
@@ -129,7 +140,12 @@ pub struct PackagesState {
     pub install_remote: String,
     pub busy: bool,
     pub action_busy: bool,
-    pub searching: bool,
+    /// Search results for each manager, shown in their own dialog so the
+    /// installed list stays on screen.
+    pub search_apk: Vec<ApkPackage>,
+    pub search_flatpak: Vec<FlatpakPackage>,
+    pub search_open: bool,
+    pub search_page: usize,
     /// An update check has completed for the current scope/kind.
     pub updates_checked: bool,
     /// An update check is running right now.
@@ -193,7 +209,10 @@ impl Default for PackagesState {
             install_remote: String::new(),
             busy: false,
             action_busy: false,
-            searching: false,
+            search_apk: Vec::new(),
+            search_flatpak: Vec::new(),
+            search_open: false,
+            search_page: 0,
             updates_checked: false,
             updates_checking: false,
             updates_seq: 0,
@@ -237,7 +256,10 @@ impl PackagesState {
         self.flatpak.clear();
         self.flatpak_updates.clear();
         self.flatpak_remotes.clear();
-        self.searching = false;
+        self.search_apk.clear();
+        self.search_flatpak.clear();
+        self.search_open = false;
+        self.search_page = 0;
         self.search_busy = false;
         self.pattern_result = None;
         self.installed_filter.clear();
@@ -775,15 +797,7 @@ impl PackagesState {
                 let rows = page
                     .into_iter()
                     .map(|package| {
-                        let actions: Vec<Element<'_, Message>> = if self.searching {
-                            vec![button::text("Install")
-                                .on_press_maybe(
-                                    (!self.busy && !self.action_busy).then_some(
-                                        Message::PackageInstallDirect(package.name.clone()),
-                                    ),
-                                )
-                                .into()]
-                        } else if package.protected {
+                        let actions: Vec<Element<'_, Message>> = if package.protected {
                             vec![text("protected").into()]
                         } else {
                             let mut buttons: Vec<Element<'_, Message>> = Vec::with_capacity(2);
@@ -846,40 +860,35 @@ impl PackagesState {
                                 line.push_str(&remote.url);
                             }
                         }
-                        let actions: Vec<Element<'_, Message>> = if self.searching {
-                            vec![button::text("Install")
-                                .on_press_maybe((!self.busy && !self.action_busy).then_some(
-                                    Message::PackageInstallDirect(package.app_id.clone()),
-                                ))
-                                .into()]
-                        } else if package.kind == FlatpakRefKind::Runtime {
-                            vec![text("protected").into()]
-                        } else {
-                            let mut buttons: Vec<Element<'_, Message>> = Vec::with_capacity(3);
-                            if self
-                                .flatpak_updates
-                                .iter()
-                                .any(|u| u.app_id == package.app_id)
-                            {
-                                buttons.push(
-                                    button::text("Upgrade")
-                                        .on_press_maybe(
-                                            (!self.busy && !self.action_busy).then_some(
-                                                Message::FlatpakUpgradeRequested(
-                                                    package.app_id.clone(),
+                        let actions: Vec<Element<'_, Message>> =
+                            if package.kind == FlatpakRefKind::Runtime {
+                                vec![text("protected").into()]
+                            } else {
+                                let mut buttons: Vec<Element<'_, Message>> = Vec::with_capacity(3);
+                                if self
+                                    .flatpak_updates
+                                    .iter()
+                                    .any(|u| u.app_id == package.app_id)
+                                {
+                                    buttons.push(
+                                        button::text("Upgrade")
+                                            .on_press_maybe(
+                                                (!self.busy && !self.action_busy).then_some(
+                                                    Message::FlatpakUpgradeRequested(
+                                                        package.app_id.clone(),
+                                                    ),
                                                 ),
-                                            ),
-                                        )
-                                        .into(),
-                                );
-                            }
-                            buttons.push(remove_button(
-                                kind,
-                                &package.app_id,
-                                !self.busy && !self.action_busy,
-                            ));
-                            buttons
-                        };
+                                            )
+                                            .into(),
+                                    );
+                                }
+                                buttons.push(remove_button(
+                                    kind,
+                                    &package.app_id,
+                                    !self.busy && !self.action_busy,
+                                ));
+                                buttons
+                            };
                         package_row(
                             &package.name,
                             &package.version,
@@ -896,7 +905,7 @@ impl PackagesState {
         let (page_count, page, _) = page_bounds(matched, self.installed_page);
         let listed = matched;
         let empty_note = if rows.is_empty() {
-            if filtering || self.searching {
+            if filtering {
                 Some(("No matches".to_string(), "No packages matched.".to_string()))
             } else if !self.busy {
                 Some(("Result".to_string(), "No packages installed.".to_string()))
@@ -912,14 +921,7 @@ impl PackagesState {
             page_count,
             page_previous: Message::PackageListPagePrevious,
             page_next: Message::PackageListPageNext,
-            title: format!(
-                "{} ({listed})",
-                if self.searching {
-                    "Search results"
-                } else {
-                    "Installed"
-                }
-            ),
+            title: format!("Installed ({listed})"),
             filter: Some(FilterVm {
                 value: self.installed_filter.clone(),
                 on_input: Message::PackageFilterChanged,
@@ -929,6 +931,93 @@ impl PackagesState {
             rows,
             footer: Vec::new(),
         };
+
+        // --- Search dialog (own window, installed list untouched) ---
+        let search_list = self.search_open.then(|| match kind {
+            PackageKind::Apk => {
+                let len = self.search_apk.len();
+                let (page_count, page, start) = page_bounds(len, self.search_page);
+                let rows =
+                    self.search_apk
+                        .iter()
+                        .skip(start)
+                        .take(crate::package_ui::PAGE_SIZE)
+                        .map(|package| {
+                            package_row(
+                                &package.name,
+                                &package.version,
+                                package.description.as_ref(),
+                                package.origin.clone(),
+                                vec![button::text("Install")
+                                    .on_press_maybe((!self.busy && !self.action_busy).then_some(
+                                        Message::PackageInstallDirect(package.name.clone()),
+                                    ))
+                                    .into()],
+                                compact,
+                            )
+                        })
+                        .collect();
+                ListVm {
+                    title: format!("Search results ({len})"),
+                    browse: Message::PackageSearchClose,
+                    page,
+                    page_count,
+                    page_previous: Message::PackageSearchPagePrevious,
+                    page_next: Message::PackageSearchPageNext,
+                    filter: None,
+                    status: search_status(self.search_busy, self.error.as_ref()),
+                    empty_note: (!self.search_busy && len == 0)
+                        .then(|| ("No matches".to_string(), "No packages matched.".to_string())),
+                    rows,
+                    footer: Vec::new(),
+                }
+            }
+            PackageKind::Flatpak => {
+                let len = self.search_flatpak.len();
+                let (page_count, page, start) = page_bounds(len, self.search_page);
+                let rows = self
+                    .search_flatpak
+                    .iter()
+                    .skip(start)
+                    .take(crate::package_ui::PAGE_SIZE)
+                    .map(|package| {
+                        let mut identity: Vec<&str> = vec![package.app_id.as_str()];
+                        if !package.branch.is_empty() {
+                            identity.push(&package.branch);
+                        }
+                        if !package.origin.is_empty() {
+                            identity.push(&package.origin);
+                        }
+                        package_row(
+                            &package.name,
+                            &package.version,
+                            package.description.as_ref(),
+                            Some(identity.join(" · ")),
+                            vec![button::text("Install")
+                                .on_press_maybe((!self.busy && !self.action_busy).then_some(
+                                    Message::PackageInstallDirect(package.app_id.clone()),
+                                ))
+                                .into()],
+                            compact,
+                        )
+                    })
+                    .collect();
+                ListVm {
+                    title: format!("Search results ({len})"),
+                    browse: Message::PackageSearchClose,
+                    page,
+                    page_count,
+                    page_previous: Message::PackageSearchPagePrevious,
+                    page_next: Message::PackageSearchPageNext,
+                    filter: None,
+                    status: search_status(self.search_busy, self.error.as_ref()),
+                    empty_note: (!self.search_busy && len == 0)
+                        .then(|| ("No matches".to_string(), "No packages matched.".to_string())),
+                    rows,
+                    footer: Vec::new(),
+                }
+            }
+        });
 
         PackageVm {
             title: kind.title().to_string(),
@@ -954,6 +1043,7 @@ impl PackagesState {
             repositories,
             pattern,
             list,
+            search_list,
             generations: None,
             generations_browse: Message::PackageListBrowserClose,
         }
