@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.47.0] — 2026-11-20
+
 ### Changed
 
 - **Wire protocol v7**: `refresh_apk` is gone — it had no GUI control (the
