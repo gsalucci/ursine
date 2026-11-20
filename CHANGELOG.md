@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.46.0] — 2026-11-20
+
 ### Changed
 
 - **Nix update check is parallel and avoids flake fetches**: the metadata
