@@ -6,6 +6,16 @@
 See `state/session-state.json` for current goals, decisions, risks, and next actions.
 See `AGENTS.md` for project context and milestone history.
 
+## Release 0.48.0 — search results in their own window (2026-11-20)
+
+**Status**: tag `v0.48.0` at `16281de`, CI `44732730677` green (pin `c7a56a9`). Host on 0.48.0.
+
+- All three managers open a half-page **search dialog** on Search: title `Search results (n)`, pagination (`search_page` per manager), per-row Install, Close. The installed list stays on the page underneath.
+- A busy state shows `Searching…` inside the dialog; empty results show `No matches`; errors surface as a status row (and on the page).
+- APK/flatpak keep search results in `search_apk`/`search_flatpak` instead of overwriting the installed lists (`searching` flag deleted); nix keeps `search_results` with `search_open`.
+- Switching package tab or installation closes the dialogs; no wire/protocol change.
+- Browser slot order unchanged: confirmations → job progress → list/generations → search.
+
 ## Release 0.47.0 — audit of the package-manager surface (2026-11-20)
 
 **Status**: tag `v0.47.0` at `47c8925`, CI `44653055406` green (pin `8091752`). Host on 0.47.0, protocol **7**.

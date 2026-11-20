@@ -1,6 +1,6 @@
 {
   "goal": "Ursine — FeralOS complete control center (Webmin-style): root daemon + libcosmic GUI (v1), full module coverage (v2), OIDC+web (v3, memory-safe stack), Incus UI (v4), ZFS+Pirateus (v5), multi-distro (v6). Intent source of truth: docs/intent/ursine.md.",
-  "status": "v0.47.0 RELEASED (tag 47c8925, CI 44653055406 green, pin 8091752, protocol v7). Nix auto-update default on; refresh_apk removed; package-manager audit clean; host on 0.47.0.",
+  "status": "v0.48.0 RELEASED (tag 16281de, CI 44732730677 green, pin c7a56a9). Package search results in their own dialog (all three managers); host on 0.48.0.",
   "active_goals": [
     "RELEASE 0.22.0 (2026-10-29): GTK3 chain + eog/galculator targets + minimize toggle + log viewer; gate green; tagged for nix release and VM smoke.",
     "v0.18.4 INIT HARDENING (2026-10-26): PID1/init detection, root-owned daemon/PAM copies, dinit unit idempotency/stale cleanup, install.sh dinit defaults/restart, CI regression coverage. Review-closed; tag pending in this release commit.",
@@ -15,7 +15,7 @@
     "Nix package chain 2026-10-21: `ursine` -> `ursined` -> `ursine-activate`; daemon owns tools/packaging. Profile discovery is generic via SUDO_HOME/SUDO_USER/default. Staged tests and Nix checks green; host service activation pending root."
   ],
   "next_actions": [
-    "Package manager: treated as complete after the audit (all actions have GUI + CLI, mutations stream through jobs).",
+    "User: press Search in nix/apk/flatpak — results must open in a separate window with Install, pagination and Close; the installed list stays visible.",
     "FeralOS install finding: host has the nixos-26.05 channel but no /etc/nix/registry.json pin; add it from the System scope."
   ],
   "key_decisions": [
@@ -98,7 +98,8 @@
     "2026-11-20 THEME MAPPING FIX: COSMIC dialogs use primary.component.base, so primary/secondary must be neutral containers; the shell accent belongs in accent*. Released 0.44.0 together with the sidebar icon fixes and the rule that disabled/capability-missing modules leave the rail.",
     "2026-11-20 PASSWORD FOCUS: init-time text_input::focus is unreliable (pre-layout); a one-shot retry on the first window Opened/Resized/Focused event puts the cursor in the password box, re-armed on sign-out. Released 0.45.0.",
     "2026-11-20 FAST UPDATE CHECK: parallel (bounded 4) per-unique-ref lock fetch; flake: aliases resolved via the registry; github targets with rev pins use git ls-remote (optional dependency, ~0.45 s) instead of nix flake metadata (fetch+eval); same proof rule (rev first, narHash fallback). list_nix_updates is user-scoped for CLI parity. Released 0.46.0; measured ~1 s on the host.",
-    "2026-11-20 PACKAGE-MANAGER AUDIT: every remaining action of nix/apk/flatpak has a GUI control and CLI parity; mutations use the job registry. refresh_apk removed (superseded by list_apk_updates, protocol v7). nix update auto-check default flipped to on now that the check is ~1 s. Module closed."
+    "2026-11-20 PACKAGE-MANAGER AUDIT: every remaining action of nix/apk/flatpak has a GUI control and CLI parity; mutations use the job registry. refresh_apk removed (superseded by list_apk_updates, protocol v7). nix update auto-check default flipped to on now that the check is ~1 s. Module closed.",
+    "2026-11-20 SEARCH DIALOG (user decision): package search results render in a half-page dialog for nix/apk/flatpak; the installed list stays on the page, each manager keeps its own results and page, tab/scope switches close the dialog. APK/flatpak no longer overwrite their installed lists with results. Released 0.48.0."
   ],
   "risks": [
     "v0.18.3 shipped before the Tier 2 review gate; 0.18.4 closes the findings. Never release before review closure again.",
