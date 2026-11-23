@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.48.1] — 2026-11-23
+
 ### Fixed
 
 - **Wayle + matugen theming**: the FeralOS Wayle seed sets
