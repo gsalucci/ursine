@@ -242,19 +242,24 @@ green = "#4daf4c"
 blue = "#35a639"
 "##;
 
-    #[test]
-    fn wayle_snapshot_reads_palette_and_provider() {
-        let snapshot = snapshot(CONFIG, None).unwrap();
+    /// Invariants shared by the static-palette and matugen snapshots.
+    fn assert_common_dark(snapshot: &ThemeSnapshot) {
         assert_eq!(snapshot.source, ThemeSource::Wayle);
         assert!(snapshot.dark);
         assert_eq!(snapshot.colors.background, "#10140f");
         assert_eq!(snapshot.colors.primary, "#4caf50");
         assert_eq!(snapshot.colors.error, "#f2b8b5");
-        assert_eq!(snapshot.colors.success, "#4daf4c");
         assert_eq!(snapshot.colors.warning, "#dacb52");
-        assert!(snapshot.name.contains("matugen"));
         // Empty = "leave the system fonts as configured" (writers skip).
         assert_eq!(snapshot.fonts.ui, "");
+    }
+
+    #[test]
+    fn wayle_snapshot_reads_palette_and_provider() {
+        let snapshot = snapshot(CONFIG, None).unwrap();
+        assert_common_dark(&snapshot);
+        assert_eq!(snapshot.colors.success, "#4daf4c");
+        assert!(snapshot.name.contains("matugen"));
         // fg-muted drives the outline (matches the shell's muted borders).
         assert_ne!(snapshot.colors.outline, snapshot.colors.background);
         let _ = contrast_on(&snapshot.colors.background);
@@ -289,12 +294,8 @@ blue = "#35a639"
     fn matugen_provider_reads_the_cache_without_a_static_palette() {
         let config = "[styling]\ntheme-provider = \"matugen\"\nrounding = \"lg\"\n";
         let snapshot = snapshot(config, Some(MATUGEN_JSON)).unwrap();
-        assert_eq!(snapshot.source, ThemeSource::Wayle);
-        assert!(snapshot.dark);
-        assert_eq!(snapshot.colors.background, "#10140f");
-        assert_eq!(snapshot.colors.primary, "#4caf50");
+        assert_common_dark(&snapshot);
         assert_eq!(snapshot.colors.success, "#4daf4c");
-        assert_eq!(snapshot.colors.warning, "#dacb52");
         assert_eq!(snapshot.corner_radius, Some(18));
         assert_eq!(snapshot.name, "matugen");
     }
