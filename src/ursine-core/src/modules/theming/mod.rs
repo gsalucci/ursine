@@ -224,7 +224,13 @@ fn baseline_show_minimize(home: &Path) -> bool {
 /// Read the winning source's config into a snapshot.
 fn snapshot_for(source: ThemeSource, home: &Path) -> Result<ThemeSnapshot, ApiError> {
     match source {
-        ThemeSource::Wayle => wayle::snapshot(&read_or_empty(&home.join(WAYLE_CONFIG))),
+        ThemeSource::Wayle => {
+            let config = read_or_empty(&home.join(WAYLE_CONFIG));
+            // Dynamic providers read their palette from the shell's cache
+            // (matugen: wayle-wallpaper runs `matugen --json hex …`).
+            let matugen = read_or_empty(&home.join(wayle::MATUGEN_CACHE));
+            wayle::snapshot(&config, (!matugen.is_empty()).then_some(matugen.as_str()))
+        }
         ThemeSource::Dms => dms::snapshot(
             &read_or_empty(&home.join(DMS_SETTINGS)),
             &read_or_empty(&home.join(DMS_CSS)),

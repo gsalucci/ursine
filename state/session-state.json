@@ -16,8 +16,7 @@
   ],
   "next_actions": [
     "User: press Search in nix/apk/flatpak — results must open in a separate window with Install, pagination and Close; the installed list stays visible.",
-    "FeralOS install finding: host has the nixos-26.05 channel but no /etc/nix/registry.json pin; add it from the System scope.",
-    "LATER (deferred by the user): reproduce the Wayle matugen failure — capture the exact GUI message, read the real Wayle config shape (`theme-provider = \"matugen\"` + palette table) and align `theming/wayle.rs`."
+    "FeralOS install finding: host has the nixos-26.05 channel but no /etc/nix/registry.json pin; add it from the System scope."
   ],
   "key_decisions": [
     "MAX-SEVERITY BINDING (2026-11-18, user): the code must pass EVERY test that can be run on it, calibrated to the strictest setting available, and any finding blocks commit, push and tag. No report-only mode, no thresholds that let findings pass, no silent skip when a tool is missing. Layers: fmt; single-pass clippy -D warnings + the whole workspace suite (unit + integration + functional); rustdoc -D warnings; repo lints (typos, editorconfig, shellcheck, shfmt, taplo, actionlint, zizmor); SAST (gitleaks full history, cargo-geiger); deps (cargo-deny advisories/licenses/bans/sources with documented upstream-only ignores, cargo-audit, cargo-machete); duplicates; SBOM; markdownlint. This is a root-capable distro control app: code must be perfect, no errors and no hacks. Tests never overlap: every check runs exactly once per gate (no duplicate CI job or step, release build is not a second test run). Overlap is fixed by removing the redundant execution, never by deleting a test unless it is a true duplicate (same assertion, same surface).",
@@ -100,7 +99,8 @@
     "2026-11-20 PASSWORD FOCUS: init-time text_input::focus is unreliable (pre-layout); a one-shot retry on the first window Opened/Resized/Focused event puts the cursor in the password box, re-armed on sign-out. Released 0.45.0.",
     "2026-11-20 FAST UPDATE CHECK: parallel (bounded 4) per-unique-ref lock fetch; flake: aliases resolved via the registry; github targets with rev pins use git ls-remote (optional dependency, ~0.45 s) instead of nix flake metadata (fetch+eval); same proof rule (rev first, narHash fallback). list_nix_updates is user-scoped for CLI parity. Released 0.46.0; measured ~1 s on the host.",
     "2026-11-20 PACKAGE-MANAGER AUDIT: every remaining action of nix/apk/flatpak has a GUI control and CLI parity; mutations use the job registry. refresh_apk removed (superseded by list_apk_updates, protocol v7). nix update auto-check default flipped to on now that the check is ~1 s. Module closed.",
-    "2026-11-20 SEARCH DIALOG (user decision): package search results render in a half-page dialog for nix/apk/flatpak; the installed list stays on the page, each manager keeps its own results and page, tab/scope switches close the dialog. APK/flatpak no longer overwrite their installed lists with results. Released 0.48.0."
+    "2026-11-20 SEARCH DIALOG (user decision): package search results render in a half-page dialog for nix/apk/flatpak; the installed list stays on the page, each manager keeps its own results and page, tab/scope switches close the dialog. APK/flatpak no longer overwrite their installed lists with results. Released 0.48.0.",
+    "2026-11-23 WAYLE MATUGEN: the FeralOS Wayle seed uses theme-provider=matugen with no [styling.palette]; Wayle (v0.7.0) runs `matugen --json hex` and caches it at ~/.cache/wayle/matugen-colors.json, which theming now reads (old/new shapes, matugen-light). Static palettes still work; missing cache/other providers give actionable errors. Wayle-host smoke pending."
   ],
   "risks": [
     "v0.18.3 shipped before the Tier 2 review gate; 0.18.4 closes the findings. Never release before review closure again.",
@@ -122,7 +122,6 @@
     "Pre-existing (since v0.7, not introduced by flatpak work): package panel loads do not bump the epoch, so a fast scope toggle can interleave in-flight list/remotes/updates responses of the old scope. Rows carry a system flag but the view does not filter by it.",
     "Source duplicates are at 0 (jscpd 50 tokens, threshold 0); any new clone is a gate failure — refactor, never raise the threshold.",
     "Dependency duplicate versions (90) come from the pinned libcosmic/iced git graph and cannot reach zero without upstream; the count is reported, never baselined.",
-    "Release draft state can hide a broken publish: the nix smoke now uses an anonymous download and the publish step forces --draft=false, so this class fails the tag gate.",
-    "Wayle theming is unverified with matugen: on DMS the applied theme and the daemon report are correct, but on Wayle the GUI reportedly shows a palette error. Deferred by the user on 2026-11-23 (owner skea999); the Wayle parser requires [styling] + [styling.palette] and should be compared against a real matugen-generated config."
+    "Release draft state can hide a broken publish: the nix smoke now uses an anonymous download and the publish step forces --draft=false, so this class fails the tag gate."
   ]
 }

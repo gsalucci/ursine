@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Wayle + matugen theming**: the FeralOS Wayle seed sets
+  `theme-provider = "matugen"` and carries no `[styling.palette]`; Wayle
+  writes the generated palette to `~/.cache/wayle/matugen-colors.json`
+  (wayle-wallpaper runs `matugen --json hex …`). The parser now reads that
+  cache (old/new matugen JSON shapes, `matugen-light` honoured) and keeps the
+  static palette path for older configs. A missing cache and unsupported
+  providers answer with actionable errors instead of a bare "no palette".
+
 ## [0.48.0] — 2026-11-20
 
 ### Changed
