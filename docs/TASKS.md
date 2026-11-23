@@ -206,6 +206,7 @@
 | Nix flake full build never run locally (eval only) | open | first CI run validates; CI flake job is the gate |
 | Shadow auth path not yet tested on a FeralOS target | open | fixture-based unit tests green in CI; log in with a real user on FeralOS before v1.0 |
 | Full init activation not tested | open | `systemd-analyze verify` green, `dinitcheck` green; OpenRC start blocked by container read-only cgroups. Run on a disposable VM/real target. |
+| Wayle + matugen: Theming reports a palette error while DMS works | open (deferred by the user 2026-11-23) | first check the real Wayle `~/.config/wayle/config.toml` shape: `theming/wayle.rs` requires `[styling]` + `[styling.palette]` keys; record the exact GUI message. Owner: skea999 |
 | FeralOS host has the nixos-26.05 channel but no `/etc/nix/registry.json` pin | open | flakes resolve nixpkgs-unstable; add the pin from the Ursine System scope or restore it in the FeralOS installer |
 | `scripts/test-host.sh` never executed (host acceptance) | resolved | run it after the next tag: registry entry, published-flake refresh, profile upgrade/install, `sudo ursine-activate`, version/service/`ursinectl` checks |
 | Duplicate crate versions in the dependency graph (90) | resolved (report) | all from the pinned libcosmic/iced graph; `cargo tree -d` stays a report in the run dir, never a committed baseline |

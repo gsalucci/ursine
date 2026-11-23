@@ -6,6 +6,11 @@
 See `state/session-state.json` for current goals, decisions, risks, and next actions.
 See `AGENTS.md` for project context and milestone history.
 
+## Open item — Wayle + matugen theming (deferred 2026-11-23)
+
+- On this host (DMS/quickshell) Theming works end to end: `theme_get` returns the matugen palette, `theme_apply` reports every target written, and the daemon audit has no theming errors.
+- The user reports a palette error on **Wayle**, to be investigated later (owner: skea999). Start from the exact GUI message plus a real `~/.config/wayle/config.toml`: `theming/wayle.rs` expects `[styling]` and `[styling.palette]` keys, while matugen may write a different shape (the fixture uses `theme-provider = "matugen"`).
+
 ## Release 0.48.0 — search results in their own window (2026-11-20)
 
 **Status**: tag `v0.48.0` at `16281de`, CI `44732730677` green (pin `c7a56a9`). Host on 0.48.0.
